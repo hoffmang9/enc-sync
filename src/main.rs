@@ -19,6 +19,11 @@ use enc_sync::{home_dir, load_config, run};
 
 const HOME_CONFIG_REL: &str = ".enc-sync/config.toml";
 
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "test_env.rs"]
+mod test_env;
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -82,7 +87,6 @@ See enc-sync.example.toml for configuration options.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use enc_sync::test_env::EnvGuard;
     use std::fs;
     use tempfile::TempDir;
 
@@ -93,15 +97,12 @@ mod tests {
         fs::write(&local, "chart_dir = \"/tmp/charts\"\n").unwrap();
 
         let home = TempDir::new().unwrap();
-        let _home_guard = EnvGuard::override_home_dirs(home.path());
         let home_config = home.path().join(HOME_CONFIG_REL);
         fs::create_dir_all(home_config.parent().unwrap()).unwrap();
         fs::write(&home_config, "chart_dir = \"/other\"\n").unwrap();
 
-        let saved_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _guard = crate::test_env::EnvGuard::override_home_dirs_and_cwd(home.path(), dir.path());
         let discovered = discover_config_path();
-        std::env::set_current_dir(saved_cwd).unwrap();
 
         assert_eq!(discovered, Some(PathBuf::from("enc-sync.toml")));
     }

@@ -9,7 +9,11 @@ use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 #[cfg(not(windows))]
-pub use enc_sync::test_env::TestHome;
+#[allow(dead_code)]
+#[path = "../../src/test_env.rs"]
+mod test_env;
+#[cfg(not(windows))]
+pub use test_env::TestHome;
 
 pub fn toml_path(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")

@@ -37,9 +37,7 @@ pub(crate) fn load_update_data(chart_dir: &Path) -> Result<BTreeMap<String, i64>
 
 pub(crate) fn save_update_data(chart_dir: &Path, data: &BTreeMap<String, i64>) -> Result<()> {
     let path = chart_dir.join(UPDATE_DATA_FILENAME);
-    let tmp_path = chart_dir.join(format!(".{UPDATE_DATA_FILENAME}.{}", std::process::id()));
-    write_atomically(&path, &tmp_path, |tmp| {
-        let mut file = File::create(tmp)?;
+    write_atomically(&path, |file| {
         for (key, value) in data {
             writeln!(file, "{key} {value}")?;
         }
@@ -47,20 +45,17 @@ pub(crate) fn save_update_data(chart_dir: &Path, data: &BTreeMap<String, i64>) -
     })
 }
 
-fn write_atomically(
-    path: &Path,
-    tmp_path: &Path,
-    write: impl FnOnce(&Path) -> Result<()>,
-) -> Result<()> {
-    let result = (|| -> Result<()> {
-        write(tmp_path)?;
-        fs::rename(tmp_path, path)?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(tmp_path);
-    }
-    result
+fn write_atomically(path: &Path, write: impl FnOnce(&mut File) -> Result<()>) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("creating temporary file near {}", path.display()))?;
+    write(tmp.as_file_mut())?;
+    tmp.as_file_mut()
+        .sync_all()
+        .with_context(|| format!("flushing temporary file for {}", path.display()))?;
+    tmp.persist(path)
+        .with_context(|| format!("replacing {}", path.display()))?;
+    Ok(())
 }
 
 pub(crate) fn local_cell_mtime(chart_dir: &Path, cell_name: &str) -> Option<i64> {
@@ -140,14 +135,11 @@ fn fetch_url(url: &str) -> Result<Vec<u8>> {
 
 pub(crate) fn download_catalog(config: &Config) -> Result<PathBuf> {
     let catalog_path = config.chart_dir.join(CATALOG_FILENAME);
-    let tmp_path = config
-        .chart_dir
-        .join(format!(".catalog-{}.xml", std::process::id()));
 
     log::info!("Downloading catalog {}", config.catalog_url);
     let catalog_url = config.catalog_url.clone();
-    write_atomically(&catalog_path, &tmp_path, |tmp| {
-        fs::write(tmp, fetch_url(&catalog_url)?)?;
+    write_atomically(&catalog_path, |file| {
+        file.write_all(&fetch_url(&catalog_url)?)?;
         Ok(())
     })?;
     log::info!("Catalog saved to {}", catalog_path.display());
