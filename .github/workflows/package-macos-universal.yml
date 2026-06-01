@@ -1,0 +1,28 @@
+name: package-macos-universal
+
+on:
+  workflow_call:
+
+jobs:
+  package-macos-universal:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-*
+          path: target/distrib/
+          merge-multiple: true
+
+      - name: Combine macOS per-arch builds into universal binary
+        run: ./scripts/combine-macos-universal.sh
+
+      - name: Upload macOS universal archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-macos-universal
+          path: target/distrib/enc-sync-universal-apple-darwin.tar.gz

@@ -1,15 +1,31 @@
 [workspace]
 members = ["cargo:."]
 
-# Workspace-level cargo-dist settings. Package build targets live in dist.toml.
-# After `dist generate`, preserve the macOS universal merge step in release.yml.
+# Release customization lives in scripts/ and global-artifacts-jobs workflows.
+#
+# Mac universal contract: dist.toml lists per-arch *-apple-darwin targets for build.
+# package-macos-universal (combine-macos-universal.sh) must run before finalize.
+# prepare-release-bundle.sh ships universal-apple-darwin, never per-arch mac archives.
+#
+# allow-dirty = ["ci"] tells cargo-dist it may skip regenerating release.yml when
+# that file differs from the template. Run ./scripts/verify-release-workflow-patches.rb
+# after `dist generate` to confirm required hunks are still present.
+#
+# After `dist generate`, re-apply release.yml patches (or restore from git):
+#   - plan: release_version output + ./scripts/release-version.sh step
+#   - build-global: upload artifacts-dist-manifests
+#   - custom-finalize-release-artifacts: needs custom-package-macos-universal; with.release_version
+#   - host: manifest fetches; ./scripts/create-github-release.sh
+#   - omit announce job
 [dist]
 cargo-dist-version = "0.32.0"
 ci = "github"
 hosting = "github"
 installers = []
 merge-tasks = true
+pr-run-mode = "upload"
 allow-dirty = ["ci"]
+global-artifacts-jobs = ["./package-macos-universal", "./finalize-release-artifacts"]
 
 [dist.github-custom-runners]
 x86_64-apple-darwin = "macos-14"

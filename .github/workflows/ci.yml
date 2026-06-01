@@ -27,6 +27,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Verify release workflow patches
+        run: ruby ./scripts/verify-release-workflow-patches.rb
+
       - name: Clippy
         env:
           RUSTFLAGS: -W rust-2024-compatibility

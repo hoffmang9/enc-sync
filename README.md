@@ -32,12 +32,18 @@ macOS universal binary (Intel + Apple Silicon), and a Windows `.exe`. Download t
 archive for your platform from the [Releases](https://github.com/hoffmang9/enc-sync/releases)
 page.
 
+Release archives are versioned in the filename, for example
+`enc-sync-0.1.0-x86_64-unknown-linux-musl.tar.gz`. Pull request builds publish the same
+four platform bundles (including `ubuntu-22.04-arm` for Raspberry Pi 64-bit) as a
+downloadable workflow artifact named `enc-sync-<version>-pr.<number>.<sha>`. Artifact
+uploads are skipped for pull requests from repository forks (GitHub token scope).
+
 Each archive includes `RELEASE-INSTALL.md` with platform-specific install steps and
 notes on macOS Gatekeeper and Windows SmartScreen for unsigned binaries.
 
-To cut a release locally, bump the version, commit, tag (`git tag v0.1.0`), and push
-the tag. The [Release workflow](.github/workflows/release.yml) builds all targets and
-uploads them to the GitHub Release.
+To cut a release, bump the version in `Cargo.toml`, commit, tag (`git tag v0.1.0`), and
+push the tag. The [Release workflow](.github/workflows/release.yml) builds all targets and
+uploads versioned files to the GitHub Release.
 
 ## Configure
 

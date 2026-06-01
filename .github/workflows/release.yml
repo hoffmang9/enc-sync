@@ -44,6 +44,10 @@ on:
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
+concurrency:
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
@@ -53,6 +57,7 @@ jobs:
       tag: ${{ !github.event.pull_request && github.ref_name || '' }}
       tag-flag: ${{ !github.event.pull_request && format('--tag={0}', github.ref_name) || '' }}
       publishing: ${{ !github.event.pull_request }}
+      release_version: ${{ steps.release_version.outputs.value }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -81,6 +86,8 @@ jobs:
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
+      - id: release_version
+        run: echo "value=$(./scripts/release-version.sh)" >> "$GITHUB_OUTPUT"
       - name: "Upload dist-manifest.json"
         uses: actions/upload-artifact@v7
         with:
@@ -127,6 +134,10 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ join(matrix.targets, '-') }}
+          cache-provider: ${{ matrix.cache_provider }}
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest
@@ -144,12 +155,6 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
-      # Custom step (preserve when re-running `dist generate`):
-      # merge per-arch macOS archives into one universal tarball for release.
-      - name: Combine macOS builds into universal binary archive
-        if: contains(join(matrix.targets, ','), 'apple-darwin')
-        shell: bash
-        run: ./scripts/combine-macos-universal.sh dist-manifest.json
       - id: cargo-dist
         name: Post-build
         # We force bash here just because github makes it really hard to get values up
@@ -217,19 +222,41 @@ jobs:
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+      - name: Upload dist manifests for release notes
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-dist-manifests
+          path: target/distrib/*-dist-manifest.json
+
+  custom-package-macos-universal:
+    needs:
+      - plan
+      - build-local-artifacts
+    uses: ./.github/workflows/package-macos-universal.yml
+    secrets: inherit
+
+  custom-finalize-release-artifacts:
+    needs:
+      - plan
+      - build-local-artifacts
+      - custom-package-macos-universal
+    uses: ./.github/workflows/finalize-release-artifacts.yml
+    with:
+      release_version: ${{ needs.plan.outputs.release_version }}
+    secrets: inherit
   # Determines if we should publish/announce
   host:
     needs:
       - plan
       - build-local-artifacts
       - build-global-artifacts
+      - custom-package-macos-universal
+      - custom-finalize-release-artifacts
     # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.custom-package-macos-universal.result == 'skipped' || needs.custom-package-macos-universal.result == 'success') && (needs.custom-finalize-release-artifacts.result == 'skipped' || needs.custom-finalize-release-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04"
-    outputs:
-      val: ${{ steps.host.outputs.manifest }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -241,62 +268,22 @@ jobs:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
       - run: chmod +x ~/.cargo/bin/dist
-      # Fetch artifacts from scratch-storage
-      - name: Fetch artifacts
+      - name: Fetch plan manifest
         uses: actions/download-artifact@v8
         with:
-          pattern: artifacts-*
+          name: artifacts-plan-dist-manifest
           path: target/distrib/
-          merge-multiple: true
-      - id: host
-        shell: bash
-        run: |
-          dist host ${{ needs.plan.outputs.tag-flag }} --steps=upload --steps=release --output-format=json > dist-manifest.json
-          echo "artifacts uploaded and released successfully"
-          cat dist-manifest.json
-          echo "manifest=$(jq -c "." dist-manifest.json)" >> "$GITHUB_OUTPUT"
-      - name: "Upload dist-manifest.json"
-        uses: actions/upload-artifact@v7
-        with:
-          # Overwrite the previous copy
-          name: artifacts-dist-manifest
-          path: dist-manifest.json
-      # Create a GitHub Release while uploading all files to it
-      - name: "Download GitHub Artifacts"
+      - name: Fetch build manifests
         uses: actions/download-artifact@v8
         with:
-          pattern: artifacts-*
-          path: artifacts
-          merge-multiple: true
-      - name: Cleanup
-        run: |
-          # Remove the granular manifests
-          rm -f artifacts/*-dist-manifest.json
-      - name: Create GitHub Release
-        env:
-          PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
-          ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
-          ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
-          RELEASE_COMMIT: "${{ github.sha }}"
-        run: |
-          # Write and read notes from a file to avoid quoting breaking things
-          echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
-
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
-
-  announce:
-    needs:
-      - plan
-      - host
-    # use "always() && ..." to allow us to wait for all publish jobs while
-    # still allowing individual publish jobs to skip themselves (for prereleases).
-    # "host" however must run to completion, no skipping allowed!
-    if: ${{ always() && needs.host.result == 'success' }}
-    runs-on: "ubuntu-22.04"
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
+          name: artifacts-dist-manifests
+          path: target/distrib/
+      - name: Download release bundle
+        uses: actions/download-artifact@v8
         with:
-          persist-credentials: false
-          submodules: recursive
+          name: enc-sync-${{ needs.plan.outputs.release_version }}
+          path: artifacts
+      - name: Publish GitHub Release
+        env:
+          TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
+        run: ./scripts/create-github-release.sh "${{ needs.plan.outputs.tag }}" artifacts dist-manifest.json
