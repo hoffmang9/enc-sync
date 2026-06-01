@@ -82,6 +82,7 @@ See enc-sync.example.toml for configuration options.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use enc_sync::test_env::EnvGuard;
     use std::fs;
     use tempfile::TempDir;
 
@@ -91,13 +92,8 @@ mod tests {
         let local = dir.path().join("enc-sync.toml");
         fs::write(&local, "chart_dir = \"/tmp/charts\"\n").unwrap();
 
-        let saved_home = std::env::var_os("HOME");
-        #[cfg(windows)]
-        let saved_profile = std::env::var_os("USERPROFILE");
         let home = TempDir::new().unwrap();
-        std::env::set_var("HOME", home.path());
-        #[cfg(windows)]
-        std::env::set_var("USERPROFILE", home.path());
+        let _home_guard = EnvGuard::override_home_dirs(home.path());
         let home_config = home.path().join(HOME_CONFIG_REL);
         fs::create_dir_all(home_config.parent().unwrap()).unwrap();
         fs::write(&home_config, "chart_dir = \"/other\"\n").unwrap();
@@ -106,16 +102,6 @@ mod tests {
         std::env::set_current_dir(dir.path()).unwrap();
         let discovered = discover_config_path();
         std::env::set_current_dir(saved_cwd).unwrap();
-        if let Some(prev) = saved_home {
-            std::env::set_var("HOME", prev);
-        } else {
-            std::env::remove_var("HOME");
-        }
-        #[cfg(windows)]
-        match saved_profile {
-            Some(prev) => std::env::set_var("USERPROFILE", prev),
-            None => std::env::remove_var("USERPROFILE"),
-        }
 
         assert_eq!(discovered, Some(PathBuf::from("enc-sync.toml")));
     }
