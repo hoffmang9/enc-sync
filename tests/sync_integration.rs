@@ -9,8 +9,7 @@ use tempfile::TempDir;
 const CA_TIMESTAMP: i64 = 1_717_200_000;
 
 fn write_config(config_path: &Path, chart_dir: &str, catalog_url: &str) {
-    // TOML basic strings treat `\` as escape; Windows paths need forward slashes or escaping.
-    let chart_dir = chart_dir.replace('\\', "/");
+    let chart_dir = common::toml_path(Path::new(chart_dir));
     let text = format!(
         r#"
 chart_dir = "{chart_dir}"

@@ -38,6 +38,7 @@ use filters::Filters;
 use opencpn::restart_opencpn;
 
 pub fn run(config: &Config) -> Result<()> {
+    config::prepare_chart_dir(&config.chart_dir)?;
     let filters = Filters::from_config(config);
 
     if filters.is_active() {

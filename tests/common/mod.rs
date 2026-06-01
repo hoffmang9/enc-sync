@@ -46,6 +46,11 @@ fn restore_env(key: &str, value: Option<OsString>) {
     }
 }
 
+/// Format a path for embedding in a TOML basic string (forward slashes, no escapes).
+pub fn toml_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
 pub fn build_cell_zip(cell_name: &str, payload: &[u8]) -> Vec<u8> {
     let mut buffer = Vec::new();
     {

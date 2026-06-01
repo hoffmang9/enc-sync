@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -37,8 +37,30 @@ pub fn load_config(path: &Path) -> Result<Config> {
         fs::read_to_string(path).with_context(|| format!("reading config {}", path.display()))?;
     let mut config: Config =
         toml::from_str(&text).with_context(|| format!("parsing config {}", path.display()))?;
-    config.chart_dir = expand_path(&config.chart_dir)?;
+    config.chart_dir = validate_chart_dir(&config.chart_dir)?;
     Ok(config)
+}
+
+fn validate_chart_dir(path: &Path) -> Result<PathBuf> {
+    let expanded = expand_path(path)?;
+    if chart_dir_is_blank(&expanded) {
+        bail!("chart_dir must not be empty");
+    }
+    if expanded.is_file() {
+        bail!(
+            "chart_dir {} is a file, not a directory",
+            expanded.display()
+        );
+    }
+    Ok(expanded)
+}
+
+pub(crate) fn prepare_chart_dir(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("creating chart directory {}", path.display()))
+}
+
+fn chart_dir_is_blank(path: &Path) -> bool {
+    path.as_os_str().is_empty() || path.to_str().is_some_and(|s| s.trim().is_empty())
 }
 
 pub fn expand_path(path: &Path) -> Result<PathBuf> {
@@ -117,6 +139,10 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn toml_path(path: &Path) -> String {
+        path.display().to_string().replace('\\', "/")
+    }
+
     #[test]
     fn load_config_expands_tilde_in_chart_dir() {
         let dir = TempDir::new().unwrap();
@@ -149,27 +175,115 @@ chart_dir = "~/Charts/ENC/US"
     #[test]
     fn load_config_parses_example_fields() {
         let dir = TempDir::new().unwrap();
+        let chart_dir = dir.path().join("charts/enc");
         let path = dir.path().join("config.toml");
         fs::write(
             &path,
-            r#"
-chart_dir = "/charts/enc"
+            format!(
+                r#"
+chart_dir = "{}"
 states = ["CA", "OR"]
 regions = ["14"]
 coast_guard_districts = ["11"]
 restart_opencpn = false
 "#,
+                toml_path(&chart_dir)
+            ),
         )
         .unwrap();
 
         let config = load_config(&path).unwrap();
-        assert_eq!(config.chart_dir, PathBuf::from("/charts/enc"));
+        assert_eq!(config.chart_dir, chart_dir);
         assert_eq!(config.states, vec!["CA", "OR"]);
         assert_eq!(config.regions, vec!["14"]);
         assert_eq!(config.coast_guard_districts, vec!["11"]);
         assert!(!config.restart_opencpn);
         assert!(config.rebuild_chart_db);
         assert!(config.catalog_url.contains("ENCProdCat.xml"));
+    }
+
+    #[test]
+    fn load_config_rejects_empty_chart_dir() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, r#"chart_dir = """#).unwrap();
+
+        let error = load_config(&path).unwrap_err();
+        assert!(
+            error.to_string().contains("chart_dir must not be empty"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn load_config_rejects_whitespace_chart_dir() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, r#"chart_dir = "   ""#).unwrap();
+
+        let error = load_config(&path).unwrap_err();
+        assert!(
+            error.to_string().contains("chart_dir must not be empty"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn load_config_accepts_missing_chart_dir() {
+        let dir = TempDir::new().unwrap();
+        let chart_dir = dir.path().join("Charts/ENC/US");
+        assert!(!chart_dir.exists());
+
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            format!(
+                r#"
+chart_dir = "{}"
+"#,
+                toml_path(&chart_dir)
+            ),
+        )
+        .unwrap();
+
+        let config = load_config(&path).unwrap();
+        assert_eq!(config.chart_dir, chart_dir);
+        assert!(!chart_dir.exists());
+    }
+
+    #[test]
+    fn prepare_chart_dir_creates_missing_path() {
+        let dir = TempDir::new().unwrap();
+        let chart_dir = dir.path().join("Charts/ENC/US");
+        assert!(!chart_dir.exists());
+
+        prepare_chart_dir(&chart_dir).unwrap();
+        assert!(chart_dir.is_dir());
+    }
+
+    #[test]
+    fn load_config_rejects_chart_dir_that_is_a_file() {
+        let dir = TempDir::new().unwrap();
+        let chart_path = dir.path().join("not-a-dir");
+        fs::write(&chart_path, b"file").unwrap();
+
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            format!(
+                r#"
+chart_dir = "{}"
+"#,
+                toml_path(&chart_path)
+            ),
+        )
+        .unwrap();
+
+        let error = load_config(&path).unwrap_err();
+        assert!(
+            error.to_string().contains("is a file, not a directory"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]
