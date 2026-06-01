@@ -5,6 +5,10 @@ edition = "2021"
 description = "Sync NOAA ENC charts for OpenCPN with optional area filters"
 license = "Apache-2.0"
 
+[lib]
+name = "enc_sync"
+path = "src/lib.rs"
+
 [[bin]]
 name = "enc-sync"
 path = "src/main.rs"
@@ -20,3 +24,8 @@ toml = "0.8"
 ureq = { version = "3", features = ["rustls"] }
 zip = "2"
 filetime = "0.2"
+shellexpand = "3"
+
+[dev-dependencies]
+tempfile = "3"
+tiny_http = "0.12"
