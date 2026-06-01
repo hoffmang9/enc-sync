@@ -1,12 +1,19 @@
 # enc-sync configuration
 #
-# Copy to enc-sync.toml and edit paths/filters for your setup.
+# Local use (preferred when working in a checkout or project directory):
+#   cp enc-sync.example.toml enc-sync.toml
+#
+# Machine-wide default (typical for cron):
+#   mkdir -p ~/.enc-sync && cp enc-sync.example.toml ~/.enc-sync/config.toml
+#
+# If --config is omitted, enc-sync loads ./enc-sync.toml first, then
+# ~/.enc-sync/config.toml.
 #
 # NOAA publishes ENC updates every weekday evening. Example cron:
-#   0 23 * * 1-5 /usr/local/bin/enc-sync --config ~/.config/enc-sync/config.toml \
+#   0 23 * * 1-5 enc-sync --config ~/.enc-sync/config.toml \
 #     >>/tmp/enc-sync.log 2>&1
 
-chart_dir = "/Users/hoffmang/Charts/ENC/US"
+chart_dir = "~/Charts/ENC/US"
 catalog_url = "https://www.charts.noaa.gov/ENCs/ENCProdCat.xml"
 
 # Keep these areas current. A cell is updated if it matches ANY non-empty list below.

@@ -25,15 +25,22 @@ cargo install --path .
 
 ## Configure
 
-Copy the example config and edit it:
+Copy the example config and edit it. For day-to-day use in a checkout or project
+directory, keep a local config:
 
 ```bash
-mkdir -p ~/.config/enc-sync
-cp enc-sync.example.toml ~/.config/enc-sync/config.toml
+cp enc-sync.example.toml enc-sync.toml
+```
+
+For a machine-wide default (typical for cron), install under your home directory:
+
+```bash
+mkdir -p ~/.enc-sync
+cp enc-sync.example.toml ~/.enc-sync/config.toml
 ```
 
 ```toml
-chart_dir = "/path/to/Charts/ENC/US"
+chart_dir = "~/Charts/ENC/US"
 catalog_url = "https://www.charts.noaa.gov/ENCs/ENCProdCat.xml"
 
 # A cell is updated if it matches ANY non-empty list below.
@@ -49,17 +56,29 @@ Leave all three filter lists empty to keep the entire catalog current.
 
 ## Run
 
+From a directory that contains `enc-sync.toml`:
+
 ```bash
-enc-sync --config ~/.config/enc-sync/config.toml
+enc-sync
 ```
 
-If `--config` is omitted, `enc-sync` looks for `enc-sync.toml` in the current
-directory, then `~/.config/enc-sync/config.toml`.
+Or pass an explicit path:
+
+```bash
+enc-sync --config ~/.enc-sync/config.toml
+```
+
+If `--config` is omitted, `enc-sync` looks for config in this order:
+
+1. `./enc-sync.toml` in the current directory
+2. `~/.enc-sync/config.toml`
 
 ## Cron
 
+Use an explicit path to the machine-wide config:
+
 ```cron
-0 23 * * 1-5 enc-sync --config ~/.config/enc-sync/config.toml >>/tmp/enc-sync.log 2>&1
+0 23 * * 1-5 enc-sync --config ~/.enc-sync/config.toml >>/tmp/enc-sync.log 2>&1
 ```
 
 On most days nothing will have changed and the run exits quickly.
