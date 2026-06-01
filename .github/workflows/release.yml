@@ -87,7 +87,9 @@ jobs:
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
       - id: release_version
-        run: echo "value=$(./scripts/release-version.sh)" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(./scripts/release-version.sh)"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       - name: "Upload dist-manifest.json"
         uses: actions/upload-artifact@v7
         with:
