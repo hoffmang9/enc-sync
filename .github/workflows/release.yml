@@ -19,8 +19,8 @@ permissions:
   contents: write
   statuses: write
 
-# This task will run whenever you push a git tag that looks like a version
-# like "1.0.0", "v0.1.0-prerelease.1", "my-app/0.1.0", "releases/v1.0.0", etc.
+# This task runs when you push a semver git tag (e.g. "1.0.0-rc1", "1.0.0").
+# enc-sync tags must match Cargo.toml exactly — no "v" prefix.
 # Various formats will be parsed into a VERSION and an optional PACKAGE_NAME, where
 # PACKAGE_NAME must be the name of a Cargo package in your workspace, and VERSION
 # must be a Cargo-style SemVer Version (must have at least major.minor.patch).

@@ -24,6 +24,7 @@ members = ["cargo:."]
 #   - omit announce job
 #
 # Tag releases run Release on tag push after verifying CI succeeded on that commit.
+# Git tags use bare semver (1.0.0-rc1), matching Cargo.toml — not v-prefixed names.
 [dist]
 cargo-dist-version = "0.32.0"
 ci = "github"

@@ -59,7 +59,8 @@ Each archive includes `RELEASE-INSTALL.md` with platform-specific install steps 
 notes on macOS Gatekeeper and Windows SmartScreen for unsigned binaries.
 
 To cut a release, bump the version in `Cargo.toml`, commit, merge to `main`, wait for CI
-to pass, then tag that commit and push the tag (`git tag v0.1.0 && git push origin v0.1.0`).
+to pass, then tag that commit and push the tag (`git tag 1.0.0-rc1 && git push origin 1.0.0-rc1`).
+The tag name must match the semver in `Cargo.toml` (no `v` prefix).
 The [Release workflow](.github/workflows/release.yml) verifies CI succeeded on the tagged
 commit, builds all targets, and uploads versioned files to the GitHub Release.
 
