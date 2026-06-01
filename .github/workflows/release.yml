@@ -241,28 +241,10 @@ jobs:
           name: artifacts-dist-manifests
           path: target/distrib/*-dist-manifest.json
 
-  require-ci-success:
-    name: Require CI success before publishing
-    needs:
-      - plan
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-22.04
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      WAIT_FOR_CI_SECONDS: 1800
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - name: Wait for CI success
-        run: ./scripts/require-ci-success-on-commit.sh
-
   custom-release-postbuild:
     needs:
       - plan
       - build-local-artifacts
-      - require-ci-success
-    if: ${{ always() && needs.plan.result == 'success' && needs.build-local-artifacts.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.require-ci-success.result == 'success') }}
     permissions:
       actions: write
       contents: read

@@ -38,8 +38,30 @@ jobs:
           name: artifacts-macos-universal
           path: ${{ steps.combine.outputs.universal_archive }}
 
-  finalize-release-artifacts:
+  require-ci-success:
+    name: Require CI success before bundling
     needs: package-macos-universal
+    if: inputs.publishing != 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      WAIT_FOR_CI_SECONDS: 1800
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Wait for CI success
+        run: ./scripts/require-ci-success-on-commit.sh
+
+  finalize-release-artifacts:
+    needs:
+      - package-macos-universal
+      - require-ci-success
+    if: ${{ always() && needs.package-macos-universal.result == 'success' && (inputs.publishing == 'true' || needs.require-ci-success.result == 'success') }}
     runs-on: ubuntu-22.04
     permissions:
       actions: write

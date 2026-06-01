@@ -16,9 +16,8 @@ members = ["cargo:."]
 #   - plan: require-ci-success-on-commit.sh on tag push; release_version + release-version.sh
 #   - plan outputs: publishing/tag/tag-flag use github.event_name == 'push'
 #   - build-global: if publishing == true; upload artifacts-dist-manifests
-#   - require-ci-success: PR Release builds wait for full CI before publishing artifacts
 #   - custom-release-postbuild: replaces separate mac + finalize jobs
-#   - release-postbuild: PR cleanup in finalize; tag bundle upload for host
+#   - release-postbuild: macOS universal first; PR finalize waits for full CI before bundling
 #   - cleanup-workflow-artifacts: tag releases only; DELETE_ALL after host
 #   - host: manifest fetches; ./scripts/create-github-release.sh
 #   - report-pr-release-status job; plan pending status; permissions statuses: write
