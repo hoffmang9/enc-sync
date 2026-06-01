@@ -70,14 +70,20 @@ pub fn run(config: &Config) -> Result<()> {
         let total = pending.len();
         log::info!("Downloading {total} updated or new cells");
         for (index, cell) in pending.into_iter().enumerate() {
-            let result = download_cell(&config.chart_dir, &cell, index + 1, total);
+            log::info!("Downloading {} ({} of {total})", cell.name, index + 1);
+            let result = download_cell(&config.chart_dir, &cell);
             match result {
                 Ok(()) => {
                     update_data.insert(cell_key(&cell.name), cell.timestamp);
                     updated += 1;
                 }
                 Err(error) => {
-                    log::error!("Failed to update {}: {:#}", cell.name, error);
+                    log::error!(
+                        "Failed to update {} ({} of {total}): {:#}",
+                        cell.name,
+                        index + 1,
+                        error
+                    );
                     failed.push(cell.name);
                 }
             }

@@ -207,12 +207,7 @@ fn zip_entry_rel_components(entry_name: &str) -> Result<Vec<Component<'_>>> {
     Ok(rel)
 }
 
-pub(crate) fn download_cell(
-    chart_dir: &Path,
-    cell: &Cell,
-    index: usize,
-    total: usize,
-) -> Result<()> {
+pub(crate) fn download_cell(chart_dir: &Path, cell: &Cell) -> Result<()> {
     let zip_name = cell
         .url
         .rsplit('/')
@@ -221,7 +216,6 @@ pub(crate) fn download_cell(
         .unwrap_or(cell.name.as_str());
     let zip_path = chart_dir.join(zip_name);
 
-    log::info!("Downloading {} ({index} of {total})", cell.name);
     let bytes = fetch_url(&cell.url)?;
     fs::write(&zip_path, bytes)?;
 
