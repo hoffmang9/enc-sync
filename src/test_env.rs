@@ -2,6 +2,9 @@
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard};
+
+static ENV_GUARD_LOCK: Mutex<()> = Mutex::new(());
 
 fn set_env(key: &str, value: impl AsRef<OsStr>) {
     // SAFETY: only used from single-threaded test code that restores on drop.
@@ -23,9 +26,16 @@ fn restore_env(key: &str, value: Option<OsString>) {
 /// Saves and restores environment variables for the guard's lifetime.
 pub struct EnvGuard {
     saved: Vec<(String, Option<OsString>)>,
+    _lock: MutexGuard<'static, ()>,
 }
 
 impl EnvGuard {
+    fn acquire_lock() -> MutexGuard<'static, ()> {
+        ENV_GUARD_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn save_and_set(
         saved: &mut Vec<(String, Option<OsString>)>,
         key: &str,
@@ -42,28 +52,31 @@ impl EnvGuard {
 
     /// Override `HOME`, and `USERPROFILE` on Windows, for config discovery tests.
     pub fn override_home_dirs(path: &Path) -> Self {
+        let lock = Self::acquire_lock();
         let mut saved = Vec::new();
         Self::save_and_set(&mut saved, "HOME", path);
         #[cfg(windows)]
         Self::save_and_set(&mut saved, "USERPROFILE", path);
-        Self { saved }
+        Self { saved, _lock: lock }
     }
 
     /// Unix-only: override `HOME` for tilde expansion tests.
     #[cfg(not(windows))]
     pub fn override_home(path: &Path) -> Self {
+        let lock = Self::acquire_lock();
         let mut saved = Vec::new();
         Self::save_and_set(&mut saved, "HOME", path);
-        Self { saved }
+        Self { saved, _lock: lock }
     }
 
     /// Clear home-related env vars to simulate a missing home directory.
     pub fn clear_home_dirs() -> Self {
+        let lock = Self::acquire_lock();
         let mut saved = Vec::new();
         Self::save_and_remove(&mut saved, "HOME");
         #[cfg(windows)]
         Self::save_and_remove(&mut saved, "USERPROFILE");
-        Self { saved }
+        Self { saved, _lock: lock }
     }
 }
 
