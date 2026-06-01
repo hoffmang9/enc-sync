@@ -9,10 +9,15 @@ source "$ROOT/scripts/release-targets.sh"
 DISTRIB="${DISTRIB_DIR:-target/distrib}"
 UNIX_ARCHIVE="$(unix_archive_suffix)"
 
-mapfile -t mac_triples < <(mac_per_arch_triples) || {
+mac_triples=()
+while IFS= read -r triple; do
+  [[ -n "$triple" ]] && mac_triples+=( "$triple" )
+done < <(mac_per_arch_triples)
+
+if (( ${#mac_triples[@]} != 2 )); then
   echo "dist.toml must list exactly two *-apple-darwin targets for universal macOS builds" >&2
   exit 1
-}
+fi
 
 ARM_TRIPLE=""
 X64_TRIPLE=""

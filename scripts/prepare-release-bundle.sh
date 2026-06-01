@@ -11,7 +11,10 @@ VERSION="${RELEASE_VERSION:?"RELEASE_VERSION is required"}"
 DISTRIB="${DISTRIB_DIR:-target/distrib}"
 STAGING="${STAGING_DIR:-release-staging}"
 
-mapfile -t release_suffixes < <(list_release_suffixes)
+release_suffixes=()
+while IFS= read -r suffix; do
+  [[ -n "$suffix" ]] && release_suffixes+=( "$suffix" )
+done < <(list_release_suffixes)
 if (( ${#release_suffixes[@]} == 0 )); then
   echo "no release targets found in ${RELEASE_TARGETS_DIST_TOML}" >&2
   exit 1
