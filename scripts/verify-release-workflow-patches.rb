@@ -2,6 +2,9 @@
 # Verify hand-maintained release workflow structure survived dist generate.
 # frozen_string_literal: true
 
+require "json"
+require "open3"
+require "tempfile"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
@@ -9,6 +12,7 @@ WORKFLOW = File.join(ROOT, ".github/workflows/release.yml")
 POSTBUILD_WORKFLOW = File.join(ROOT, ".github/workflows/release-postbuild.yml")
 CI_WORKFLOW = File.join(ROOT, ".github/workflows/ci.yml")
 RELEASE_SCRIPT = File.join(ROOT, "scripts/create-github-release.sh")
+CLEANUP_SCRIPT = File.join(ROOT, "scripts/cleanup-workflow-artifacts.sh")
 BUNDLE_ARTIFACT_NAME = "enc-sync-${{ needs.plan.outputs.release_version }}"
 
 def fail!(message)
@@ -26,6 +30,10 @@ end
 
 unless File.file?(RELEASE_SCRIPT)
   fail!("missing release script: #{RELEASE_SCRIPT}")
+end
+
+unless File.file?(CLEANUP_SCRIPT)
+  fail!("missing cleanup script: #{CLEANUP_SCRIPT}")
 end
 
 unless File.file?(CI_WORKFLOW)
@@ -98,6 +106,33 @@ def step_download_pattern?(steps, pattern)
   end
 end
 
+def cleanup_ids_for_fixture(script, env)
+  fixture = {
+    artifacts: [
+      { id: 101, name: "artifacts-build-local-x86_64-unknown-linux-musl" },
+      { id: 102, name: "enc-sync-0.1.0-pr.5.abcdef0" },
+      { id: 103, name: "artifacts-plan-dist-manifest" }
+    ]
+  }
+
+  Tempfile.create(["workflow-artifacts", ".json"]) do |file|
+    file.write(JSON.generate(fixture))
+    file.close
+
+    stdout, stderr, status = Open3.capture3(
+      {
+        "ARTIFACTS_JSON" => file.path,
+        "GITHUB_REPOSITORY" => "hoffmang9/enc-sync",
+        "GITHUB_RUN_ID" => "123"
+      }.merge(env),
+      script,
+      "--print-delete-ids"
+    )
+
+    [status.success?, stdout.lines.map(&:strip).reject(&:empty?), stderr]
+  end
+end
+
 plan = jobs["plan"] or errors << "missing plan job"
 if plan
   outputs = plan["outputs"] || {}
@@ -164,6 +199,22 @@ if cleanup
   end
   needs = Array(cleanup["needs"])
   errors << "cleanup-workflow-artifacts must need host" unless needs.include?("host")
+end
+
+keep_success, keep_ids, keep_stderr = cleanup_ids_for_fixture(
+  CLEANUP_SCRIPT,
+  { "KEEP_ARTIFACT_NAME" => "enc-sync-0.1.0-pr.5.abcdef0" }
+)
+unless keep_success && keep_ids == %w[101 103]
+  errors << "cleanup-workflow-artifacts keep-one mode selected #{keep_ids.inspect} (stderr: #{keep_stderr.strip})"
+end
+
+delete_all_success, delete_all_ids, delete_all_stderr = cleanup_ids_for_fixture(
+  CLEANUP_SCRIPT,
+  { "DELETE_ALL" => "true" }
+)
+unless delete_all_success && delete_all_ids == %w[101 102 103]
+  errors << "cleanup-workflow-artifacts DELETE_ALL mode selected #{delete_all_ids.inspect} (stderr: #{delete_all_stderr.strip})"
 end
 
 unless workflow_text.include?("actions: write")
