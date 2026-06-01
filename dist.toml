@@ -8,4 +8,4 @@ targets = [
     "x86_64-pc-windows-msvc",
 ]
 unix-archive = ".tar.gz"
-include = ["RELEASE-INSTALL.md"]
+include = ["README.md"]
