@@ -27,7 +27,8 @@ fi
 short_sha="${GITHUB_SHA:0:7}"
 
 if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-  printf '%s\n' "${GITHUB_REF_NAME#v}"
+  # Git tags must match Cargo.toml semver exactly (e.g. 1.0.0-rc1, not v1.0.0-rc1).
+  printf '%s\n' "${GITHUB_REF_NAME}"
 elif [[ -n "${RELEASE_PR_NUMBER:-}" ]]; then
   printf '%s\n' "${cargo_version}-pr.${RELEASE_PR_NUMBER}.${short_sha}"
 else

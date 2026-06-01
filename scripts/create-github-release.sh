@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generate dist release notes and create the GitHub release from staged artifacts.
 #
-# Requires TAG_FLAG in the environment (e.g. --tag=v0.1.0), set by the host job from
+# Requires TAG_FLAG in the environment (e.g. --tag=1.0.0-rc1), set by the host job from
 # needs.plan.outputs.tag-flag before invoking this script.
 #
 # artifacts/ is populated by prepare-release-bundle.sh with platform archives only.
