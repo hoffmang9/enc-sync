@@ -139,7 +139,6 @@ fn fetch_url(url: &str) -> Result<Vec<u8>> {
 }
 
 pub(crate) fn download_catalog(config: &Config) -> Result<PathBuf> {
-    fs::create_dir_all(&config.chart_dir)?;
     let catalog_path = config.chart_dir.join(CATALOG_FILENAME);
     let tmp_path = config
         .chart_dir
