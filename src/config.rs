@@ -56,12 +56,7 @@ fn validate_chart_dir(path: &Path) -> Result<PathBuf> {
 }
 
 pub(crate) fn prepare_chart_dir(path: &Path) -> Result<()> {
-    fs::create_dir_all(path).with_context(|| {
-        format!(
-            "creating chart directory {}",
-            path.display()
-        )
-    })
+    fs::create_dir_all(path).with_context(|| format!("creating chart directory {}", path.display()))
 }
 
 fn chart_dir_is_blank(path: &Path) -> bool {
