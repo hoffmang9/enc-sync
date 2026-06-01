@@ -120,6 +120,7 @@ struct CellBuilder {
     name: Option<String>,
     url: Option<String>,
     timestamp: Option<i64>,
+    timestamp_error: Option<anyhow::Error>,
     states: Vec<String>,
     regions: Vec<String>,
     coast_guard_districts: Vec<String>,
@@ -152,9 +153,10 @@ impl CellBuilder {
         match field {
             "name" => self.name = Some(value.trim().to_string()),
             "zipfile_location" => self.url = Some(value.trim().to_string()),
-            "zipfile_datetime_iso8601" => {
-                self.timestamp = parse_catalog_timestamp(value.trim()).ok();
-            }
+            "zipfile_datetime_iso8601" => match parse_catalog_timestamp(value.trim()) {
+                Ok(timestamp) => self.timestamp = Some(timestamp),
+                Err(error) => self.timestamp_error = Some(error),
+            },
             _ => {}
         }
     }
@@ -172,6 +174,10 @@ impl CellBuilder {
     }
 
     fn finish(self) -> Result<Option<Cell>> {
+        if let Some(error) = self.timestamp_error {
+            let name = self.name.as_deref().unwrap_or("<unknown>");
+            return Err(error.context(format!("invalid timestamp for catalog cell {name}")));
+        }
         let (Some(name), Some(url), Some(timestamp)) = (self.name, self.url, self.timestamp) else {
             return Ok(None);
         };
@@ -244,6 +250,31 @@ mod tests {
         assert_eq!(
             ca.timestamp,
             parse_catalog_timestamp("2024-06-01T00:00:00Z").unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_catalog_reports_invalid_required_timestamp() {
+        let dir = TempDir::new().unwrap();
+        let catalog_path = dir.path().join("ENCProdCat.xml");
+        fs::write(
+            &catalog_path,
+            r#"<?xml version="1.0"?>
+<catalog>
+  <cell>
+    <name>US5CA01M</name>
+    <zipfile_location>https://charts.noaa.gov/US5CA01M.zip</zipfile_location>
+    <zipfile_datetime_iso8601>not-a-date</zipfile_datetime_iso8601>
+  </cell>
+</catalog>
+"#,
+        )
+        .unwrap();
+
+        let error = parse_catalog(&catalog_path).unwrap_err();
+        assert!(
+            error.to_string().contains("invalid timestamp"),
+            "unexpected error: {error:#}"
         );
     }
 }

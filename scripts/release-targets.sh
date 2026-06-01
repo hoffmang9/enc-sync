@@ -13,26 +13,79 @@ RELEASE_TARGETS_DIST_TOML="${RELEASE_TARGETS_DIST_TOML:-$(cd "$(dirname "${BASH_
 UNIVERSAL_MAC_TRIPLE="universal-apple-darwin"
 
 _read_dist_targets() {
-  awk '
-    BEGIN { in_targets = 0 }
-    /^targets = \[/ { in_targets = 1; next }
-    in_targets && /^\]/ { exit }
-    in_targets {
-      n = split($0, parts, "\"")
-      for (i = 2; i <= n; i += 2) {
-        if (parts[i] != "") {
-          print parts[i]
-        }
-      }
-    }
-  ' "$RELEASE_TARGETS_DIST_TOML"
+  _query_dist_toml targets
 }
 
 unix_archive_suffix() {
-  local suffix
-  suffix="$(awk -F'"' '/^unix-archive/ { print $2; exit }' "$RELEASE_TARGETS_DIST_TOML")"
-  printf '%s' "${suffix:-.tar.gz}"
+  _query_dist_toml unix-archive
 }
+
+_query_dist_toml() {
+  local field=$1
+  python3 - "$RELEASE_TARGETS_DIST_TOML" "$field" <<'PY'
+import sys
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    tomllib = None
+
+
+def fallback_dist_table(path):
+    dist = {}
+    current_table = None
+    collecting_targets = False
+    targets = []
+
+    with open(path, encoding="utf-8") as config:
+        for raw_line in config:
+            line = raw_line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                current_table = line.strip("[]")
+                collecting_targets = False
+                continue
+            if current_table != "dist":
+                continue
+            if collecting_targets:
+                if line.startswith("]"):
+                    dist["targets"] = targets
+                    collecting_targets = False
+                    continue
+                targets.extend(piece for piece in line.split('"')[1::2] if piece)
+                continue
+            if line.startswith("targets"):
+                collecting_targets = True
+                targets.extend(piece for piece in line.split('"')[1::2] if piece)
+                if "]" in line:
+                    dist["targets"] = targets
+                    collecting_targets = False
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                dist[key.strip()] = value.strip().strip('"')
+
+    return dist
+
+
+path, field = sys.argv[1], sys.argv[2]
+if tomllib:
+    with open(path, "rb") as config:
+        dist = tomllib.load(config).get("dist", {})
+else:
+    dist = fallback_dist_table(path)
+
+if field == "targets":
+    for target in dist.get("targets", []):
+        print(target)
+elif field == "unix-archive":
+    print(dist.get("unix-archive", ".tar.gz"), end="")
+else:
+    raise SystemExit(f"unsupported dist.toml field: {field}")
+PY
+}
+
 
 # Print artifact suffixes shipped to users (one per line), e.g.
 # x86_64-unknown-linux-musl.tar.gz or universal-apple-darwin.tar.gz
