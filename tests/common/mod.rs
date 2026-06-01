@@ -1,11 +1,50 @@
+use std::ffi::OsString;
 use std::io::{Cursor, Write};
 use std::net::TcpListener;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
+
+pub struct TestHome {
+    saved_home: Option<OsString>,
+    #[cfg(windows)]
+    saved_profile: Option<OsString>,
+}
+
+impl TestHome {
+    pub fn set(path: &Path) -> Self {
+        let saved_home = std::env::var_os("HOME");
+        #[cfg(windows)]
+        let saved_profile = std::env::var_os("USERPROFILE");
+        std::env::set_var("HOME", path);
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", path);
+        Self {
+            saved_home,
+            #[cfg(windows)]
+            saved_profile,
+        }
+    }
+}
+
+impl Drop for TestHome {
+    fn drop(&mut self) {
+        restore_env("HOME", self.saved_home.take());
+        #[cfg(windows)]
+        restore_env("USERPROFILE", self.saved_profile.take());
+    }
+}
+
+fn restore_env(key: &str, value: Option<OsString>) {
+    match value {
+        Some(v) => std::env::set_var(key, v),
+        None => std::env::remove_var(key),
+    }
+}
 
 pub fn build_cell_zip(cell_name: &str, payload: &[u8]) -> Vec<u8> {
     let mut buffer = Vec::new();
