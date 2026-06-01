@@ -6,8 +6,10 @@ require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
 WORKFLOW = File.join(ROOT, ".github/workflows/release.yml")
+POSTBUILD_WORKFLOW = File.join(ROOT, ".github/workflows/release-postbuild.yml")
 CI_WORKFLOW = File.join(ROOT, ".github/workflows/ci.yml")
 RELEASE_SCRIPT = File.join(ROOT, "scripts/create-github-release.sh")
+BUNDLE_ARTIFACT_NAME = "enc-sync-${{ needs.plan.outputs.release_version }}"
 
 def fail!(message)
   warn message
@@ -16,6 +18,10 @@ end
 
 unless File.file?(WORKFLOW)
   fail!("missing workflow: #{WORKFLOW}")
+end
+
+unless File.file?(POSTBUILD_WORKFLOW)
+  fail!("missing workflow: #{POSTBUILD_WORKFLOW}")
 end
 
 unless File.file?(RELEASE_SCRIPT)
@@ -29,6 +35,9 @@ end
 workflow = YAML.load_file(WORKFLOW)
 jobs = workflow.fetch("jobs")
 workflow_text = File.read(WORKFLOW)
+postbuild_workflow = YAML.load_file(POSTBUILD_WORKFLOW)
+postbuild_text = File.read(POSTBUILD_WORKFLOW)
+postbuild_jobs = postbuild_workflow.fetch("jobs")
 ci_workflow = YAML.load_file(CI_WORKFLOW)
 ci_jobs = ci_workflow.fetch("jobs")
 ci_text = File.read(CI_WORKFLOW)
@@ -81,6 +90,14 @@ def step_downloads?(steps, artifact_name)
   end
 end
 
+def step_download_pattern?(steps, pattern)
+  Array(steps).any? do |step|
+    next false unless step.is_a?(Hash) && step["uses"].to_s.include?("download-artifact")
+
+    step.dig("with", "pattern") == pattern
+  end
+end
+
 plan = jobs["plan"] or errors << "missing plan job"
 if plan
   outputs = plan["outputs"] || {}
@@ -106,14 +123,56 @@ if postbuild
   unless inputs.key?("release_version")
     errors << "custom-release-postbuild missing release_version input"
   end
+  unless inputs.key?("publishing")
+    errors << "custom-release-postbuild missing publishing input"
+  end
   unless postbuild.dig("uses").to_s.include?("release-postbuild.yml")
     errors << "custom-release-postbuild must call release-postbuild.yml"
   end
 end
 
+finalize = postbuild_jobs["finalize-release-artifacts"] or errors << "release-postbuild missing finalize-release-artifacts job"
+if finalize
+  finalize_steps = finalize["steps"] || []
+  unless step_download_pattern?(finalize_steps, "artifacts-build-local-*-linux-musl")
+    errors << "finalize must download linux artifacts without mac per-arch builds"
+  end
+  unless step_download_pattern?(finalize_steps, "artifacts-build-local-*windows*")
+    errors << "finalize must download windows artifacts separately"
+  end
+  if step_download_pattern?(finalize_steps, "artifacts-build-local-*")
+    errors << "finalize must not download all artifacts-build-local-* (includes mac per-arch)"
+  end
+  unless step_runs?(finalize_steps, "cleanup-workflow-artifacts.sh")
+    errors << "finalize must run cleanup-workflow-artifacts.sh for PR artifact cleanup"
+  end
+  unless postbuild_text.include?("if: inputs.publishing != 'true'")
+    errors << "finalize cleanup must be gated on non-publishing (PR) runs"
+  end
+end
+
+cleanup = jobs["cleanup-workflow-artifacts"] or errors << "missing cleanup-workflow-artifacts job"
+if cleanup
+  unless step_runs?(cleanup["steps"], "cleanup-workflow-artifacts.sh")
+    errors << "cleanup-workflow-artifacts must run cleanup-workflow-artifacts.sh"
+  end
+  unless cleanup["if"].to_s.include?("publishing")
+    errors << "cleanup-workflow-artifacts must be gated on publishing (tag releases)"
+  end
+  unless cleanup.dig("env", "DELETE_ALL") == true || cleanup.dig("env", "DELETE_ALL") == "true"
+    errors << "cleanup-workflow-artifacts must set DELETE_ALL for tag releases"
+  end
+  needs = Array(cleanup["needs"])
+  errors << "cleanup-workflow-artifacts must need host" unless needs.include?("host")
+end
+
+unless workflow_text.include?("actions: write")
+  errors << "release workflow missing actions: write permission"
+end
+
 report_status = jobs["report-pr-release-status"] or errors << "missing report-pr-release-status job"
-if report_status && !step_runs?(report_status["steps"], "report-pr-release-status.sh")
-  errors << "report-pr-release-status must run report-pr-release-status.sh"
+if report_status && !step_runs?(report_status["steps"], "report-pr-release-status.sh report")
+  errors << "report-pr-release-status must run report-pr-release-status.sh report"
 end
 
 host = jobs["host"] or errors << "missing host job"
@@ -124,13 +183,7 @@ if host
   unless step_runs?(steps, "create-github-release.sh")
     errors << "host missing create-github-release.sh step"
   end
-  bundle_download = steps.any? do |step|
-    next false unless step.is_a?(Hash) && step["uses"].to_s.include?("download-artifact")
-
-    name = step.dig("with", "name").to_s
-    name.start_with?("enc-sync-") && name.include?("release_version")
-  end
-  errors << "host missing enc-sync release bundle download" unless bundle_download
+  errors << "host missing enc-sync release bundle download" unless step_downloads?(steps, BUNDLE_ARTIFACT_NAME)
   needs = Array(host["needs"])
   unless needs.include?("custom-release-postbuild")
     errors << "host must need custom-release-postbuild"

@@ -33,15 +33,27 @@ archive for your platform from the [Releases](https://github.com/hoffmang9/enc-s
 page.
 
 Release archives are versioned in the filename, for example
-`enc-sync-0.1.0-x86_64-unknown-linux-musl.tar.gz`. On pull requests, the [Release
-workflow](.github/workflows/release.yml) runs only after [CI](.github/workflows/ci.yml)
-passes and publishes one workflow artifact named `enc-sync-<version>-pr.<number>.<sha>`
-containing only the four platform archives (Linux x86_64, Linux aarch64/Pi, macOS universal,
-Windows). A separate PR check **`release/enc-sync`** reports Release success or failure on
-the commit (CI can pass while Release is still running or if it fails). Other artifacts on
-the Release run (manifest JSON, per-job build zips) are CI internals — ignore those when
-testing a PR build. Release builds are not triggered for pull requests from repository
-forks (GitHub token scope).
+`enc-sync-0.1.0-x86_64-unknown-linux-musl.tar.gz`.
+
+#### Pull request preview binaries
+
+PR binaries are **not** on the CI workflow run. After [CI](.github/workflows/ci.yml)
+passes, it dispatches the [Release workflow](.github/workflows/release.yml), which builds
+and uploads one workflow artifact with the four platform archives.
+
+1. Wait for the PR check **`release/enc-sync`** to turn green (Release can still be running
+   after CI is green).
+2. Open **Actions** → **Release** (not CI) → the run for your PR commit.
+3. Under **Artifacts**, download **`enc-sync-<version>-pr.<number>.<sha>`**. GitHub wraps
+   workflow artifact downloads in an extra `.zip`; unzip once to get the four
+   `enc-sync-*.tar.gz` / `.zip` files inside.
+
+Internal cargo-dist artifacts are removed when the run finishes — only the bundle above
+should remain on PR builds. Tag releases publish to GitHub Releases and leave no workflow
+artifacts.
+
+Release builds are not triggered for pull requests from repository forks (GitHub token
+scope).
 
 Each archive includes `RELEASE-INSTALL.md` with platform-specific install steps and
 notes on macOS Gatekeeper and Windows SmartScreen for unsigned binaries.

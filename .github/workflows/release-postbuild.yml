@@ -6,6 +6,9 @@ on:
       release_version:
         required: true
         type: string
+      publishing:
+        required: true
+        type: string
 
 jobs:
   package-macos-universal:
@@ -35,15 +38,24 @@ jobs:
   finalize-release-artifacts:
     needs: package-macos-universal
     runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
-      - name: Download platform build artifacts
+      - name: Download Linux build artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: artifacts-build-local-*
+          pattern: artifacts-build-local-*-linux-musl
+          path: target/distrib/
+          merge-multiple: true
+
+      - name: Download Windows build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*windows*
           path: target/distrib/
           merge-multiple: true
 
@@ -63,3 +75,9 @@ jobs:
         with:
           name: enc-sync-${{ inputs.release_version }}
           path: release-staging/
+
+      - name: Remove internal workflow artifacts
+        if: inputs.publishing != 'true'
+        env:
+          KEEP_ARTIFACT_NAME: enc-sync-${{ inputs.release_version }}
+        run: ./scripts/cleanup-workflow-artifacts.sh

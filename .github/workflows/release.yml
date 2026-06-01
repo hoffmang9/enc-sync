@@ -15,6 +15,7 @@
 
 name: Release
 permissions:
+  actions: write
   contents: write
   statuses: write
 
@@ -247,6 +248,7 @@ jobs:
     uses: ./.github/workflows/release-postbuild.yml
     with:
       release_version: ${{ needs.plan.outputs.release_version }}
+      publishing: ${{ needs.plan.outputs.publishing }}
     secrets: inherit
 
   # Determines if we should publish/announce
@@ -291,6 +293,23 @@ jobs:
           TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
         run: ./scripts/create-github-release.sh "${{ needs.plan.outputs.tag }}" artifacts dist-manifest.json
 
+  cleanup-workflow-artifacts:
+    name: Remove internal workflow artifacts
+    needs:
+      - plan
+      - host
+    if: needs.plan.outputs.publishing == 'true' && needs.host.result == 'success'
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DELETE_ALL: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Delete all workflow artifacts
+        run: ./scripts/cleanup-workflow-artifacts.sh
+
   report-pr-release-status:
     name: Report PR release status
     needs:
@@ -311,9 +330,4 @@ jobs:
           PLAN_RESULT: ${{ needs.plan.result }}
           BUILD_LOCAL_RESULT: ${{ needs.build-local-artifacts.result }}
           POSTBUILD_RESULT: ${{ needs.custom-release-postbuild.result }}
-        run: |
-          if [[ "$PLAN_RESULT" == "success" && "$BUILD_LOCAL_RESULT" == "success" && "$POSTBUILD_RESULT" == "success" ]]; then
-            ./scripts/report-pr-release-status.sh success "Release artifacts enc-sync-${RELEASE_VERSION}"
-          else
-            ./scripts/report-pr-release-status.sh failure "Release build failed"
-          fi
+        run: ./scripts/report-pr-release-status.sh report
