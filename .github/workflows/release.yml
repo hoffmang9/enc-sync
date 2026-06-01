@@ -15,7 +15,7 @@
 
 name: Release
 permissions:
-  actions: write
+  actions: read
   contents: write
   statuses: write
 
@@ -245,6 +245,9 @@ jobs:
     needs:
       - plan
       - build-local-artifacts
+    permissions:
+      actions: write
+      contents: read
     uses: ./.github/workflows/release-postbuild.yml
     with:
       release_version: ${{ needs.plan.outputs.release_version }}
@@ -300,6 +303,9 @@ jobs:
       - host
     if: needs.plan.outputs.publishing == 'true' && needs.host.result == 'success'
     runs-on: ubuntu-22.04
+    permissions:
+      actions: write
+      contents: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       DELETE_ALL: true

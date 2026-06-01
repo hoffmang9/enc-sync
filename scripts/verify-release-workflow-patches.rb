@@ -50,7 +50,14 @@ ci_workflow = YAML.load_file(CI_WORKFLOW)
 ci_jobs = ci_workflow.fetch("jobs")
 ci_text = File.read(CI_WORKFLOW)
 
+def permission_value(permissions, key)
+  return nil unless permissions.is_a?(Hash)
+
+  permissions[key]
+end
+
 errors = []
+workflow_permissions = workflow["permissions"] || {}
 
 if workflow_text.match?(/^\s*pull_request:/m)
   errors << "release workflow must not use pull_request trigger (CI dispatches via workflow_dispatch)"
@@ -60,6 +67,12 @@ unless workflow_text.match?(/^\s*workflow_dispatch:/m)
 end
 unless workflow_text.include?("statuses: write")
   errors << "release workflow missing statuses: write permission"
+end
+unless permission_value(workflow_permissions, "actions") == "read"
+  errors << "release workflow should keep workflow-level actions permission to read"
+end
+if permission_value(workflow_permissions, "actions") == "write"
+  errors << "release workflow must not grant workflow-level actions: write"
 end
 
 trigger_release = ci_jobs["trigger-release"] or errors << "ci.yml missing trigger-release job"
@@ -164,6 +177,22 @@ if postbuild
   unless postbuild.dig("uses").to_s.include?("release-postbuild.yml")
     errors << "custom-release-postbuild must call release-postbuild.yml"
   end
+  unless permission_value(postbuild["permissions"], "actions") == "write"
+    errors << "custom-release-postbuild must grant actions: write for PR artifact cleanup"
+  end
+  unless permission_value(postbuild["permissions"], "contents") == "read"
+    errors << "custom-release-postbuild should grant only contents: read"
+  end
+end
+
+package_macos = postbuild_jobs["package-macos-universal"] or errors << "release-postbuild missing package-macos-universal job"
+if package_macos
+  unless permission_value(package_macos["permissions"], "actions") == "read"
+    errors << "package-macos-universal should grant actions: read"
+  end
+  unless permission_value(package_macos["permissions"], "contents") == "read"
+    errors << "package-macos-universal should grant contents: read"
+  end
 end
 
 finalize = postbuild_jobs["finalize-release-artifacts"] or errors << "release-postbuild missing finalize-release-artifacts job"
@@ -184,6 +213,12 @@ if finalize
   unless postbuild_text.include?("if: inputs.publishing != 'true'")
     errors << "finalize cleanup must be gated on non-publishing (PR) runs"
   end
+  unless permission_value(finalize["permissions"], "actions") == "write"
+    errors << "finalize must grant actions: write for PR artifact cleanup"
+  end
+  unless permission_value(finalize["permissions"], "contents") == "read"
+    errors << "finalize should grant contents: read"
+  end
 end
 
 cleanup = jobs["cleanup-workflow-artifacts"] or errors << "missing cleanup-workflow-artifacts job"
@@ -199,6 +234,12 @@ if cleanup
   end
   needs = Array(cleanup["needs"])
   errors << "cleanup-workflow-artifacts must need host" unless needs.include?("host")
+  unless permission_value(cleanup["permissions"], "actions") == "write"
+    errors << "cleanup-workflow-artifacts must grant actions: write for tag artifact cleanup"
+  end
+  unless permission_value(cleanup["permissions"], "contents") == "read"
+    errors << "cleanup-workflow-artifacts should grant contents: read"
+  end
 end
 
 keep_success, keep_ids, keep_stderr = cleanup_ids_for_fixture(
@@ -215,10 +256,6 @@ delete_all_success, delete_all_ids, delete_all_stderr = cleanup_ids_for_fixture(
 )
 unless delete_all_success && delete_all_ids == %w[101 102 103]
   errors << "cleanup-workflow-artifacts DELETE_ALL mode selected #{delete_all_ids.inspect} (stderr: #{delete_all_stderr.strip})"
-end
-
-unless workflow_text.include?("actions: write")
-  errors << "release workflow missing actions: write permission"
 end
 
 report_status = jobs["report-pr-release-status"] or errors << "missing report-pr-release-status job"

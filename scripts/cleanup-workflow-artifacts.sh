@@ -10,6 +10,7 @@ RUN_ID="${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 DELETE_ALL="${DELETE_ALL:-false}"
 KEEP_NAME="${KEEP_ARTIFACT_NAME:-}"
+MAX_CLEANUP_PASSES="${MAX_CLEANUP_PASSES:-5}"
 
 artifact_json() {
   if [[ -n "${ARTIFACTS_JSON:-}" ]]; then
@@ -41,18 +42,68 @@ artifact_ids_to_delete() {
   artifact_json | jq -r --arg keep "$KEEP_NAME" '.artifacts[] | select(.name != $keep) | .id'
 }
 
+delete_artifact() {
+  local id=$1
+  local attempt delay=2 output
+
+  for (( attempt=1; attempt<=5; attempt++ )); do
+    if output="$(gh api -X DELETE "repos/${REPO}/actions/artifacts/${id}" 2>&1)"; then
+      return 0
+    fi
+
+    if [[ "$output" == *"404"* || "$output" == *"Not Found"* ]]; then
+      return 0
+    fi
+
+    if [[ "$output" == *"502"* || "$output" == *"503"* || "$output" == *"429"* ]]; then
+      echo "artifact ${id} delete failed (attempt ${attempt}/5): ${output}" >&2
+      sleep "$delay"
+      delay=$((delay * 2))
+      continue
+    fi
+
+    echo "$output" >&2
+    return 1
+  done
+
+  echo "artifact ${id} delete failed after retries" >&2
+  return 1
+}
+
 if [[ "${1:-}" == "--print-delete-ids" ]]; then
   artifact_ids_to_delete
   exit 0
 fi
 
 deleted=0
-while IFS= read -r id; do
-  [[ -n "$id" ]] || continue
-  echo "Deleting artifact ${id}"
-  gh api -X DELETE "repos/${REPO}/actions/artifacts/${id}"
-  deleted=$((deleted + 1))
-done < <(artifact_ids_to_delete)
+for (( pass=1; pass<=MAX_CLEANUP_PASSES; pass++ )); do
+  pending_ids=()
+  while IFS= read -r id; do
+    [[ -n "$id" ]] && pending_ids+=( "$id" )
+  done < <(artifact_ids_to_delete)
+
+  if (( ${#pending_ids[@]} == 0 )); then
+    break
+  fi
+
+  pass_failed=0
+  for id in "${pending_ids[@]}"; do
+    echo "Deleting artifact ${id}"
+    if delete_artifact "$id"; then
+      deleted=$((deleted + 1))
+    else
+      pass_failed=1
+    fi
+  done
+
+  if (( pass_failed == 0 )); then
+    break
+  fi
+
+  echo "cleanup pass ${pass} incomplete; retrying after pause" >&2
+  sleep 3
+done
+
 echo "Deleted ${deleted} workflow artifact(s)"
 
 if [[ "$DELETE_ALL" == "true" ]]; then
