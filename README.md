@@ -33,17 +33,21 @@ archive for your platform from the [Releases](https://github.com/hoffmang9/enc-s
 page.
 
 Release archives are versioned in the filename, for example
-`enc-sync-0.1.0-x86_64-unknown-linux-musl.tar.gz`. Pull request builds publish the same
-four platform bundles (including `ubuntu-22.04-arm` for Raspberry Pi 64-bit) as a
-downloadable workflow artifact named `enc-sync-<version>-pr.<number>.<sha>`. Artifact
-uploads are skipped for pull requests from repository forks (GitHub token scope).
+`enc-sync-0.1.0-x86_64-unknown-linux-musl.tar.gz`. On pull requests, the [Release
+workflow](.github/workflows/release.yml) runs only after [CI](.github/workflows/ci.yml)
+passes and publishes one workflow artifact named `enc-sync-<version>-pr.<number>.<sha>`
+containing only the four platform archives (Linux x86_64, Linux aarch64/Pi, macOS universal,
+Windows). Other artifacts on the Release run (manifest JSON, per-job build zips) are CI
+internals — ignore those when testing a PR build. Release builds are not triggered for
+pull requests from repository forks (GitHub token scope).
 
 Each archive includes `RELEASE-INSTALL.md` with platform-specific install steps and
 notes on macOS Gatekeeper and Windows SmartScreen for unsigned binaries.
 
-To cut a release, bump the version in `Cargo.toml`, commit, tag (`git tag v0.1.0`), and
-push the tag. The [Release workflow](.github/workflows/release.yml) builds all targets and
-uploads versioned files to the GitHub Release.
+To cut a release, bump the version in `Cargo.toml`, commit, merge to `main`, wait for CI
+to pass, then tag that commit and push the tag (`git tag v0.1.0 && git push origin v0.1.0`).
+The [Release workflow](.github/workflows/release.yml) verifies CI succeeded on the tagged
+commit, builds all targets, and uploads versioned files to the GitHub Release.
 
 ## Configure
 

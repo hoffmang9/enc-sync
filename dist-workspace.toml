@@ -3,20 +3,24 @@ members = ["cargo:."]
 
 # Release customization lives in scripts/ and global-artifacts-jobs workflows.
 #
-# Mac universal contract: dist.toml lists per-arch *-apple-darwin targets for build.
-# package-macos-universal (combine-macos-universal.sh) must run before finalize.
-# prepare-release-bundle.sh ships universal-apple-darwin, never per-arch mac archives.
+# Universal macOS: cargo-dist has no native lipo support (axodotdev/cargo-dist#77).
+# dist.toml lists per-arch *-apple-darwin targets; release-postbuild.yml runs
+# combine-macos-universal.sh then prepare-release-bundle.sh.
 #
 # allow-dirty = ["ci"] tells cargo-dist it may skip regenerating release.yml when
 # that file differs from the template. Run ./scripts/verify-release-workflow-patches.rb
 # after `dist generate` to confirm required hunks are still present.
 #
 # After `dist generate`, re-apply release.yml patches (or restore from git):
-#   - plan: release_version output + ./scripts/release-version.sh step
-#   - build-global: upload artifacts-dist-manifests
-#   - custom-finalize-release-artifacts: needs custom-package-macos-universal; with.release_version
+#   - on: workflow_dispatch (pr_number input) + push tags; not pull_request (CI dispatches)
+#   - plan: require-ci-success-on-commit.sh on tag push; release_version + release-version.sh
+#   - plan outputs: publishing/tag/tag-flag use github.event_name == 'push'
+#   - build-global: if publishing == true; upload artifacts-dist-manifests
+#   - custom-release-postbuild: replaces separate mac + finalize jobs
 #   - host: manifest fetches; ./scripts/create-github-release.sh
 #   - omit announce job
+#
+# Tag releases run Release on tag push after verifying CI succeeded on that commit.
 [dist]
 cargo-dist-version = "0.32.0"
 ci = "github"
@@ -25,7 +29,7 @@ installers = []
 merge-tasks = true
 pr-run-mode = "upload"
 allow-dirty = ["ci"]
-global-artifacts-jobs = ["./package-macos-universal", "./finalize-release-artifacts"]
+global-artifacts-jobs = ["./release-postbuild"]
 
 [dist.github-custom-runners]
 x86_64-apple-darwin = "macos-14"

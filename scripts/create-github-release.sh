@@ -3,6 +3,8 @@
 #
 # Requires TAG_FLAG in the environment (e.g. --tag=v0.1.0), set by the host job from
 # needs.plan.outputs.tag-flag before invoking this script.
+#
+# artifacts/ is populated by prepare-release-bundle.sh with platform archives only.
 set -euo pipefail
 
 TAG="${1:?"release tag required"}"

@@ -1,14 +1,31 @@
 #!/usr/bin/env bash
-# Build a universal macOS tarball from per-arch dist archives. File operations only.
-#
-# Contract: dist.toml lists per-arch *-apple-darwin targets; prepare-release-bundle.sh
-# expects enc-sync-universal-apple-darwin.tar.gz from this script (see dist-workspace.toml).
+# Merge per-arch macOS dist archives into one universal tarball (lipo).
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=release-targets.sh
+source "$ROOT/scripts/release-targets.sh"
+
 DISTRIB="${DISTRIB_DIR:-target/distrib}"
-ARM_TRIPLE="aarch64-apple-darwin"
-X64_TRIPLE="x86_64-apple-darwin"
-UNIVERSAL_TRIPLE="universal-apple-darwin"
+UNIX_ARCHIVE="$(unix_archive_suffix)"
+
+mapfile -t mac_triples < <(mac_per_arch_triples) || {
+  echo "dist.toml must list exactly two *-apple-darwin targets for universal macOS builds" >&2
+  exit 1
+}
+
+ARM_TRIPLE=""
+X64_TRIPLE=""
+for triple in "${mac_triples[@]}"; do
+  case "$triple" in
+    aarch64-apple-darwin) ARM_TRIPLE=$triple ;;
+    x86_64-apple-darwin) X64_TRIPLE=$triple ;;
+    *)
+      echo "unsupported macOS target for lipo: ${triple}" >&2
+      exit 1
+      ;;
+  esac
+done
 
 find_archive() {
   local triple=$1
@@ -18,13 +35,8 @@ find_archive() {
 ARM_ARCHIVE="$(find_archive "$ARM_TRIPLE")"
 X64_ARCHIVE="$(find_archive "$X64_TRIPLE")"
 
-if [[ -z "$ARM_ARCHIVE" && -z "$X64_ARCHIVE" ]]; then
-  echo "macOS per-arch archives not found; expected ${ARM_TRIPLE} and ${X64_TRIPLE}" >&2
-  exit 1
-fi
-
 if [[ -z "$ARM_ARCHIVE" || -z "$X64_ARCHIVE" ]]; then
-  echo "expected both ${ARM_TRIPLE} and ${X64_TRIPLE} archives" >&2
+  echo "macOS per-arch archives not found; expected ${ARM_TRIPLE} and ${X64_TRIPLE}" >&2
   exit 1
 fi
 
@@ -53,16 +65,26 @@ if [[ ! -f "$ARM_BIN" || ! -f "$X64_BIN" ]]; then
   exit 1
 fi
 
-STAGING="$WORK/enc-sync-${UNIVERSAL_TRIPLE}"
+STAGING="$WORK/enc-sync-${UNIVERSAL_MAC_TRIPLE}"
 mkdir -p "$STAGING"
 cp -a "$WORK/arm/enc-sync-${ARM_TRIPLE}/." "$STAGING/"
 lipo -create -output "$STAGING/enc-sync" "$X64_BIN" "$ARM_BIN"
 chmod +x "$STAGING/enc-sync"
 
-UNIVERSAL_ARCHIVE="$DISTRIB/enc-sync-${UNIVERSAL_TRIPLE}.tar.gz"
-tar czf "$UNIVERSAL_ARCHIVE" -C "$WORK" "enc-sync-${UNIVERSAL_TRIPLE}"
+UNIVERSAL_ARCHIVE="$DISTRIB/enc-sync-${UNIVERSAL_MAC_TRIPLE}${UNIX_ARCHIVE}"
+case "$UNIX_ARCHIVE" in
+  .tar.gz) tar czf "$UNIVERSAL_ARCHIVE" -C "$WORK" "enc-sync-${UNIVERSAL_MAC_TRIPLE}" ;;
+  *)
+    echo "unsupported unix-archive suffix for universal bundle: ${UNIX_ARCHIVE}" >&2
+    exit 1
+    ;;
+esac
 
 rm -f "$ARM_ARCHIVE" "${ARM_ARCHIVE}.sha256" "$X64_ARCHIVE" "${X64_ARCHIVE}.sha256"
 
 echo "Created universal macOS archive: $UNIVERSAL_ARCHIVE"
 lipo -info "$STAGING/enc-sync"
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  echo "universal_archive=${UNIVERSAL_ARCHIVE}" >>"$GITHUB_OUTPUT"
+fi

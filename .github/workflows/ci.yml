@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-22.04-arm, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
 
@@ -68,3 +68,28 @@ jobs:
         run: |
           test "${{ needs.lint.result }}" = "success"
           test "${{ needs.test.result }}" = "success"
+
+  trigger-release:
+    name: Trigger release build
+    needs: ci
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.ci.result == 'success' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release.yml',
+              ref: context.payload.pull_request.head.sha,
+              inputs: {
+                pr_number: String(context.payload.pull_request.number),
+              },
+            });
