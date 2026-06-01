@@ -77,6 +77,12 @@ end
 
 trigger_release = ci_jobs["trigger-release"] or errors << "ci.yml missing trigger-release job"
 if trigger_release
+  unless Array(trigger_release["needs"]).include?("lint") || trigger_release["needs"] == "lint"
+    errors << "ci.yml trigger-release must need lint so release builds start after lint"
+  end
+  if Array(trigger_release["needs"]).include?("ci") || trigger_release["needs"] == "ci"
+    errors << "ci.yml trigger-release must not wait for full CI"
+  end
   unless ci_text.include?("createWorkflowDispatch")
     errors << "ci.yml trigger-release must dispatch Release via createWorkflowDispatch"
   end
@@ -165,6 +171,10 @@ if build_global
   end
 end
 
+if jobs.key?("require-ci-success")
+  errors << "require-ci-success must live in release-postbuild after macOS universal packaging"
+end
+
 postbuild = jobs["custom-release-postbuild"] or errors << "missing custom-release-postbuild job"
 if postbuild
   inputs = postbuild.dig("with") || {}
@@ -176,6 +186,13 @@ if postbuild
   end
   unless postbuild.dig("uses").to_s.include?("release-postbuild.yml")
     errors << "custom-release-postbuild must call release-postbuild.yml"
+  end
+  needs = Array(postbuild["needs"])
+  if needs.include?("require-ci-success")
+    errors << "custom-release-postbuild must not wait for CI before macOS universal packaging"
+  end
+  if postbuild["if"].to_s.include?("require-ci-success")
+    errors << "custom-release-postbuild if condition must not gate before macOS universal packaging"
   end
   unless permission_value(postbuild["permissions"], "actions") == "write"
     errors << "custom-release-postbuild must grant actions: write for PR artifact cleanup"
@@ -195,9 +212,41 @@ if package_macos
   end
 end
 
+postbuild_require_ci = postbuild_jobs["require-ci-success"] or errors << "release-postbuild missing require-ci-success job"
+if postbuild_require_ci
+  unless postbuild_require_ci["if"].to_s.include?("inputs.publishing")
+    errors << "release-postbuild require-ci-success must run only for PR builds"
+  end
+  unless Array(postbuild_require_ci["needs"]).include?("package-macos-universal") || postbuild_require_ci["needs"] == "package-macos-universal"
+    errors << "release-postbuild require-ci-success must wait for package-macos-universal"
+  end
+  unless step_runs?(postbuild_require_ci["steps"], "require-ci-success-on-commit.sh")
+    errors << "release-postbuild require-ci-success must run require-ci-success-on-commit.sh"
+  end
+  unless postbuild_require_ci.dig("env", "WAIT_FOR_CI_SECONDS").to_s != ""
+    errors << "release-postbuild require-ci-success must wait for CI completion"
+  end
+  unless permission_value(postbuild_require_ci["permissions"], "actions") == "read"
+    errors << "release-postbuild require-ci-success should grant actions: read"
+  end
+  unless permission_value(postbuild_require_ci["permissions"], "contents") == "read"
+    errors << "release-postbuild require-ci-success should grant contents: read"
+  end
+end
+
 finalize = postbuild_jobs["finalize-release-artifacts"] or errors << "release-postbuild missing finalize-release-artifacts job"
 if finalize
   finalize_steps = finalize["steps"] || []
+  finalize_needs = Array(finalize["needs"])
+  unless finalize_needs.include?("package-macos-universal")
+    errors << "finalize must wait for package-macos-universal"
+  end
+  unless finalize_needs.include?("require-ci-success")
+    errors << "finalize must wait for require-ci-success before bundling PR artifacts"
+  end
+  unless finalize["if"].to_s.include?("require-ci-success")
+    errors << "finalize if condition must require CI success on PR releases"
+  end
   unless step_download_pattern?(finalize_steps, "artifacts-build-local-*-linux-musl")
     errors << "finalize must download linux artifacts without mac per-arch builds"
   end
