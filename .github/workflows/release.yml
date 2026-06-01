@@ -15,7 +15,8 @@
 
 name: Release
 permissions:
-  "contents": "write"
+  contents: write
+  statuses: write
 
 # This task will run whenever you push a git tag that looks like a version
 # like "1.0.0", "v0.1.0-prerelease.1", "my-app/0.1.0", "releases/v1.0.0", etc.
@@ -70,6 +71,9 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      - name: Mark PR release status pending
+        if: github.event_name == 'workflow_dispatch'
+        run: ./scripts/report-pr-release-status.sh pending "Release build in progress"
       - name: Require CI success on tagged commit
         if: github.event_name == 'push'
         run: ./scripts/require-ci-success-on-commit.sh
@@ -286,3 +290,30 @@ jobs:
         env:
           TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
         run: ./scripts/create-github-release.sh "${{ needs.plan.outputs.tag }}" artifacts dist-manifest.json
+
+  report-pr-release-status:
+    name: Report PR release status
+    needs:
+      - plan
+      - build-local-artifacts
+      - custom-release-postbuild
+    if: always() && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Report commit status
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.release_version }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          BUILD_LOCAL_RESULT: ${{ needs.build-local-artifacts.result }}
+          POSTBUILD_RESULT: ${{ needs.custom-release-postbuild.result }}
+        run: |
+          if [[ "$PLAN_RESULT" == "success" && "$BUILD_LOCAL_RESULT" == "success" && "$POSTBUILD_RESULT" == "success" ]]; then
+            ./scripts/report-pr-release-status.sh success "Release artifacts enc-sync-${RELEASE_VERSION}"
+          else
+            ./scripts/report-pr-release-status.sh failure "Release build failed"
+          fi

@@ -37,9 +37,11 @@ Release archives are versioned in the filename, for example
 workflow](.github/workflows/release.yml) runs only after [CI](.github/workflows/ci.yml)
 passes and publishes one workflow artifact named `enc-sync-<version>-pr.<number>.<sha>`
 containing only the four platform archives (Linux x86_64, Linux aarch64/Pi, macOS universal,
-Windows). Other artifacts on the Release run (manifest JSON, per-job build zips) are CI
-internals — ignore those when testing a PR build. Release builds are not triggered for
-pull requests from repository forks (GitHub token scope).
+Windows). A separate PR check **`release/enc-sync`** reports Release success or failure on
+the commit (CI can pass while Release is still running or if it fails). Other artifacts on
+the Release run (manifest JSON, per-job build zips) are CI internals — ignore those when
+testing a PR build. Release builds are not triggered for pull requests from repository
+forks (GitHub token scope).
 
 Each archive includes `RELEASE-INSTALL.md` with platform-specific install steps and
 notes on macOS Gatekeeper and Windows SmartScreen for unsigned binaries.

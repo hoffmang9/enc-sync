@@ -41,6 +41,9 @@ end
 unless workflow_text.match?(/^\s*workflow_dispatch:/m)
   errors << "release workflow missing workflow_dispatch trigger"
 end
+unless workflow_text.include?("statuses: write")
+  errors << "release workflow missing statuses: write permission"
+end
 
 trigger_release = ci_jobs["trigger-release"] or errors << "ci.yml missing trigger-release job"
 if trigger_release
@@ -52,6 +55,9 @@ if trigger_release
   end
   unless ci_text.include?("pr_number")
     errors << "ci.yml trigger-release must pass pr_number input"
+  end
+  unless ci_text.include?("release/enc-sync")
+    errors << "ci.yml trigger-release must post release/enc-sync commit status"
   end
 end
 
@@ -81,6 +87,7 @@ if plan
   errors << "plan job missing release_version output" unless outputs.key?("release_version")
   errors << "plan job missing release-version.sh step" unless step_runs?(plan["steps"], "release-version.sh")
   errors << "plan job missing require-ci-success-on-commit.sh step" unless step_runs?(plan["steps"], "require-ci-success-on-commit.sh")
+  errors << "plan job missing report-pr-release-status.sh pending step" unless step_runs?(plan["steps"], "report-pr-release-status.sh pending")
 end
 
 build_global = jobs["build-global-artifacts"] or errors << "missing build-global-artifacts job"
@@ -102,6 +109,11 @@ if postbuild
   unless postbuild.dig("uses").to_s.include?("release-postbuild.yml")
     errors << "custom-release-postbuild must call release-postbuild.yml"
   end
+end
+
+report_status = jobs["report-pr-release-status"] or errors << "missing report-pr-release-status job"
+if report_status && !step_runs?(report_status["steps"], "report-pr-release-status.sh")
+  errors << "report-pr-release-status must run report-pr-release-status.sh"
 end
 
 host = jobs["host"] or errors << "missing host job"

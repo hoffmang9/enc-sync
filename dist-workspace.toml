@@ -18,6 +18,7 @@ members = ["cargo:."]
 #   - build-global: if publishing == true; upload artifacts-dist-manifests
 #   - custom-release-postbuild: replaces separate mac + finalize jobs
 #   - host: manifest fetches; ./scripts/create-github-release.sh
+#   - report-pr-release-status job; plan pending status; permissions statuses: write
 #   - omit announce job
 #
 # Tag releases run Release on tag push after verifying CI succeeded on that commit.
