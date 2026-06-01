@@ -67,8 +67,10 @@ pub fn run(config: &Config) -> Result<()> {
     if pending.is_empty() {
         log::info!("All filtered catalog cells are up to date on disk");
     } else {
-        log::info!("Downloading {} updated or new cells", pending.len());
-        for cell in pending {
+        let total = pending.len();
+        log::info!("Downloading {total} updated or new cells");
+        for (index, cell) in pending.into_iter().enumerate() {
+            log::info!("Downloading {} ({} of {total})", cell.name, index + 1);
             let result = download_cell(&config.chart_dir, &cell);
             match result {
                 Ok(()) => {
@@ -76,7 +78,12 @@ pub fn run(config: &Config) -> Result<()> {
                     updated += 1;
                 }
                 Err(error) => {
-                    log::error!("Failed to update {}: {:#}", cell.name, error);
+                    log::error!(
+                        "Failed to update {} ({} of {total}): {:#}",
+                        cell.name,
+                        index + 1,
+                        error
+                    );
                     failed.push(cell.name);
                 }
             }

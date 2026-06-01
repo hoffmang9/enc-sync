@@ -216,7 +216,6 @@ pub(crate) fn download_cell(chart_dir: &Path, cell: &Cell) -> Result<()> {
         .unwrap_or(cell.name.as_str());
     let zip_path = chart_dir.join(zip_name);
 
-    log::info!("Downloading {}", cell.name);
     let bytes = fetch_url(&cell.url)?;
     fs::write(&zip_path, bytes)?;
 
