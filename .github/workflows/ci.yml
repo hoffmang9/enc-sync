@@ -28,7 +28,9 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        env:
+          RUSTFLAGS: -W rust-2024-compatibility
+        run: cargo clippy --all-targets --locked --features test-helpers -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
@@ -49,7 +51,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Run tests
-        run: cargo test --locked
+        env:
+          RUSTFLAGS: -W rust-2024-compatibility
+        run: cargo test --locked --features test-helpers
 
   ci:
     name: CI

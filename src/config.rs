@@ -79,65 +79,6 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 #[cfg(test)]
-mod test_home {
-    use std::ffi::{OsStr, OsString};
-    use std::path::Path;
-
-    fn set_env(key: &str, value: impl AsRef<OsStr>) {
-        // SAFETY: tests are single-threaded and restore previous env on drop.
-        unsafe { std::env::set_var(key, value) }
-    }
-
-    fn remove_env(key: &str) {
-        // SAFETY: tests are single-threaded and restore previous env on drop.
-        unsafe { std::env::remove_var(key) }
-    }
-
-    pub struct Guard {
-        saved_home: Option<OsString>,
-        #[cfg(windows)]
-        saved_profile: Option<OsString>,
-    }
-
-    impl Guard {
-        #[cfg(not(windows))]
-        pub fn set(path: &Path) -> Self {
-            let saved_home = std::env::var_os("HOME");
-            set_env("HOME", path);
-            Self { saved_home }
-        }
-
-        pub fn clear() -> Self {
-            let saved_home = std::env::var_os("HOME");
-            #[cfg(windows)]
-            let saved_profile = std::env::var_os("USERPROFILE");
-            remove_env("HOME");
-            #[cfg(windows)]
-            remove_env("USERPROFILE");
-            Self {
-                saved_home,
-                #[cfg(windows)]
-                saved_profile,
-            }
-        }
-    }
-
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            restore("HOME", self.saved_home.take());
-            #[cfg(windows)]
-            restore("USERPROFILE", self.saved_profile.take());
-        }
-    }
-
-    fn restore(key: &str, value: Option<OsString>) {
-        match value {
-            Some(v) => set_env(key, v),
-            None => remove_env(key),
-        }
-    }
-}
-#[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -160,7 +101,7 @@ chart_dir = "~/Charts/ENC/US"
 
         #[cfg(not(windows))]
         {
-            let _home = test_home::Guard::set(dir.path());
+            let _home = crate::test_env::EnvGuard::override_home(dir.path());
             let config = load_config(&path).unwrap();
             assert_eq!(config.chart_dir, dir.path().join("Charts/ENC/US"));
         }
@@ -291,7 +232,7 @@ chart_dir = "{}"
 
     #[test]
     fn expand_path_errors_when_home_missing() {
-        let _home = test_home::Guard::clear();
+        let _home = crate::test_env::EnvGuard::clear_home_dirs();
         if home_dir().is_some() {
             return;
         }

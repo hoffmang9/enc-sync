@@ -24,6 +24,8 @@ mod charts;
 mod config;
 mod filters;
 mod opencpn;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_env;
 
 use anyhow::{bail, Result};
 

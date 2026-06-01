@@ -5,6 +5,9 @@ edition = "2021"
 description = "Sync NOAA ENC charts for OpenCPN with optional area filters"
 license = "Apache-2.0"
 
+[features]
+test-helpers = []
+
 [lib]
 name = "enc_sync"
 path = "src/lib.rs"

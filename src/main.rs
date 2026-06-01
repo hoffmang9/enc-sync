@@ -82,26 +82,9 @@ See enc-sync.example.toml for configuration options.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::{OsStr, OsString};
+    use enc_sync::test_env::EnvGuard;
     use std::fs;
     use tempfile::TempDir;
-
-    fn set_env(key: &str, value: impl AsRef<OsStr>) {
-        // SAFETY: tests are single-threaded and restore previous env before returning.
-        unsafe { std::env::set_var(key, value) }
-    }
-
-    fn remove_env(key: &str) {
-        // SAFETY: tests are single-threaded and restore previous env before returning.
-        unsafe { std::env::remove_var(key) }
-    }
-
-    fn restore_env(key: &str, value: Option<OsString>) {
-        match value {
-            Some(v) => set_env(key, v),
-            None => remove_env(key),
-        }
-    }
 
     #[test]
     fn discover_config_path_prefers_local_enc_sync_toml() {
@@ -109,13 +92,8 @@ mod tests {
         let local = dir.path().join("enc-sync.toml");
         fs::write(&local, "chart_dir = \"/tmp/charts\"\n").unwrap();
 
-        let saved_home = std::env::var_os("HOME");
-        #[cfg(windows)]
-        let saved_profile = std::env::var_os("USERPROFILE");
         let home = TempDir::new().unwrap();
-        set_env("HOME", home.path());
-        #[cfg(windows)]
-        set_env("USERPROFILE", home.path());
+        let _home_guard = EnvGuard::override_home_dirs(home.path());
         let home_config = home.path().join(HOME_CONFIG_REL);
         fs::create_dir_all(home_config.parent().unwrap()).unwrap();
         fs::write(&home_config, "chart_dir = \"/other\"\n").unwrap();
@@ -124,9 +102,6 @@ mod tests {
         std::env::set_current_dir(dir.path()).unwrap();
         let discovered = discover_config_path();
         std::env::set_current_dir(saved_cwd).unwrap();
-        restore_env("HOME", saved_home);
-        #[cfg(windows)]
-        restore_env("USERPROFILE", saved_profile);
 
         assert_eq!(discovered, Some(PathBuf::from("enc-sync.toml")));
     }

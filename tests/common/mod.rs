@@ -9,48 +9,7 @@ use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 #[cfg(not(windows))]
-mod test_home {
-    use std::ffi::{OsStr, OsString};
-    use std::path::Path;
-
-    fn set_env(key: &str, value: impl AsRef<OsStr>) {
-        // SAFETY: tests are single-threaded and restore previous env on drop.
-        unsafe { std::env::set_var(key, value) }
-    }
-
-    fn remove_env(key: &str) {
-        // SAFETY: tests are single-threaded and restore previous env on drop.
-        unsafe { std::env::remove_var(key) }
-    }
-
-    fn restore_env(key: &str, value: Option<OsString>) {
-        match value {
-            Some(v) => set_env(key, v),
-            None => remove_env(key),
-        }
-    }
-
-    pub struct TestHome {
-        saved_home: Option<OsString>,
-    }
-
-    impl TestHome {
-        pub fn set(path: &Path) -> Self {
-            let saved_home = std::env::var_os("HOME");
-            set_env("HOME", path);
-            Self { saved_home }
-        }
-    }
-
-    impl Drop for TestHome {
-        fn drop(&mut self) {
-            restore_env("HOME", self.saved_home.take());
-        }
-    }
-}
-
-#[cfg(not(windows))]
-pub use test_home::TestHome;
+pub use enc_sync::test_env::TestHome;
 
 pub fn toml_path(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
