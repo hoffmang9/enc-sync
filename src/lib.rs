@@ -28,7 +28,7 @@ mod opencpn;
 use anyhow::{bail, Result};
 
 pub use catalog::Cell;
-pub use config::{load_config, Config};
+pub use config::{home_dir, load_config, Config};
 
 use catalog::parse_catalog;
 use charts::{

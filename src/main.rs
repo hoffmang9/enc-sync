@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use enc_sync::{load_config, run};
+use enc_sync::{home_dir, load_config, run};
 
 const HOME_CONFIG_REL: &str = ".enc-sync/config.toml";
 
@@ -33,8 +33,7 @@ fn discover_config_path() -> Option<PathBuf> {
     if local.is_file() {
         return Some(local);
     }
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
+    home_dir()
         .map(|home| home.join(HOME_CONFIG_REL))
         .filter(|path| path.is_file())
 }
@@ -93,8 +92,12 @@ mod tests {
         fs::write(&local, "chart_dir = \"/tmp/charts\"\n").unwrap();
 
         let saved_home = std::env::var_os("HOME");
+        #[cfg(windows)]
+        let saved_profile = std::env::var_os("USERPROFILE");
         let home = TempDir::new().unwrap();
         std::env::set_var("HOME", home.path());
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", home.path());
         let home_config = home.path().join(HOME_CONFIG_REL);
         fs::create_dir_all(home_config.parent().unwrap()).unwrap();
         fs::write(&home_config, "chart_dir = \"/other\"\n").unwrap();
@@ -107,6 +110,11 @@ mod tests {
             std::env::set_var("HOME", prev);
         } else {
             std::env::remove_var("HOME");
+        }
+        #[cfg(windows)]
+        match saved_profile {
+            Some(prev) => std::env::set_var("USERPROFILE", prev),
+            None => std::env::remove_var("USERPROFILE"),
         }
 
         assert_eq!(discovered, Some(PathBuf::from("enc-sync.toml")));

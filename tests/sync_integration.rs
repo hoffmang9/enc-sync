@@ -9,6 +9,8 @@ use tempfile::TempDir;
 const CA_TIMESTAMP: i64 = 1_717_200_000;
 
 fn write_config(config_path: &Path, chart_dir: &str, catalog_url: &str) {
+    // TOML basic strings treat `\` as escape; Windows paths need forward slashes or escaping.
+    let chart_dir = chart_dir.replace('\\', "/");
     let text = format!(
         r#"
 chart_dir = "{chart_dir}"
@@ -74,11 +76,11 @@ fn sync_downloads_filtered_cells_and_skips_when_up_to_date() {
     );
 }
 
+#[cfg(not(windows))]
 #[test]
 fn sync_uses_tilde_chart_dir_from_home_config() {
     let home = TempDir::new().unwrap();
-    let saved_home = std::env::var_os("HOME");
-    std::env::set_var("HOME", home.path());
+    let _home_guard = common::TestHome::set(home.path());
 
     let config_dir = home.path().join(".enc-sync");
     std::fs::create_dir_all(&config_dir).unwrap();
@@ -104,10 +106,4 @@ fn sync_uses_tilde_chart_dir_from_home_config() {
     let chart_file = chart_dir.join("US5CA01M/US5CA01M.000");
     assert!(chart_file.is_file());
     assert_eq!(std::fs::read(chart_file).unwrap(), b"tilde-home-chart");
-
-    if let Some(prev) = saved_home {
-        std::env::set_var("HOME", prev);
-    } else {
-        std::env::remove_var("HOME");
-    }
 }

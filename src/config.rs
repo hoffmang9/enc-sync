@@ -45,16 +45,73 @@ pub fn expand_path(path: &Path) -> Result<PathBuf> {
     let Some(raw) = path.to_str() else {
         return Ok(path.to_path_buf());
     };
-    if raw.contains('~') && dirs_home().is_none() {
-        anyhow::bail!("cannot expand '{raw}': HOME is not set");
+    if raw.contains('~') && home_dir().is_none() {
+        anyhow::bail!("cannot expand '{raw}': home directory is not set");
     }
     Ok(PathBuf::from(shellexpand::tilde(raw).into_owned()))
 }
 
-fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+/// User home directory, matching [`shellexpand::tilde`] (`USERPROFILE` on Windows, `HOME` elsewhere).
+pub fn home_dir() -> Option<PathBuf> {
+    dirs::home_dir()
 }
 
+#[cfg(test)]
+mod test_home {
+    use std::ffi::OsString;
+    use std::path::Path;
+
+    pub struct Guard {
+        saved_home: Option<OsString>,
+        #[cfg(windows)]
+        saved_profile: Option<OsString>,
+    }
+
+    impl Guard {
+        pub fn set(path: &Path) -> Self {
+            let saved_home = std::env::var_os("HOME");
+            #[cfg(windows)]
+            let saved_profile = std::env::var_os("USERPROFILE");
+            std::env::set_var("HOME", path);
+            #[cfg(windows)]
+            std::env::set_var("USERPROFILE", path);
+            Self {
+                saved_home,
+                #[cfg(windows)]
+                saved_profile,
+            }
+        }
+
+        pub fn clear() -> Self {
+            let saved_home = std::env::var_os("HOME");
+            #[cfg(windows)]
+            let saved_profile = std::env::var_os("USERPROFILE");
+            std::env::remove_var("HOME");
+            #[cfg(windows)]
+            std::env::remove_var("USERPROFILE");
+            Self {
+                saved_home,
+                #[cfg(windows)]
+                saved_profile,
+            }
+        }
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            restore("HOME", self.saved_home.take());
+            #[cfg(windows)]
+            restore("USERPROFILE", self.saved_profile.take());
+        }
+    }
+
+    fn restore(key: &str, value: Option<OsString>) {
+        match value {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,9 +120,6 @@ mod tests {
     #[test]
     fn load_config_expands_tilde_in_chart_dir() {
         let dir = TempDir::new().unwrap();
-        let saved_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", dir.path());
-
         let path = dir.path().join("config.toml");
         fs::write(
             &path,
@@ -75,13 +129,20 @@ chart_dir = "~/Charts/ENC/US"
         )
         .unwrap();
 
-        let config = load_config(&path).unwrap();
-        assert_eq!(config.chart_dir, dir.path().join("Charts/ENC/US"));
+        #[cfg(not(windows))]
+        {
+            let _home = test_home::Guard::set(dir.path());
+            let config = load_config(&path).unwrap();
+            assert_eq!(config.chart_dir, dir.path().join("Charts/ENC/US"));
+        }
 
-        if let Some(prev) = saved_home {
-            std::env::set_var("HOME", prev);
-        } else {
-            std::env::remove_var("HOME");
+        #[cfg(windows)]
+        {
+            let config = load_config(&path).unwrap();
+            let expected = home_dir()
+                .expect("Windows profile directory")
+                .join("Charts/ENC/US");
+            assert_eq!(config.chart_dir, expected);
         }
     }
 
@@ -113,12 +174,10 @@ restart_opencpn = false
 
     #[test]
     fn expand_path_errors_when_home_missing() {
-        let saved = std::env::var_os("HOME");
-        std::env::remove_var("HOME");
-        let result = expand_path(Path::new("~/Charts"));
-        if let Some(home) = saved {
-            std::env::set_var("HOME", home);
+        let _home = test_home::Guard::clear();
+        if home_dir().is_some() {
+            return;
         }
-        assert!(result.is_err());
+        assert!(expand_path(Path::new("~/Charts")).is_err());
     }
 }

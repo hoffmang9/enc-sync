@@ -25,6 +25,7 @@ ureq = { version = "3", features = ["rustls"] }
 zip = "2"
 filetime = "0.2"
 shellexpand = "3"
+dirs = "6"
 
 [dev-dependencies]
 tempfile = "3"
