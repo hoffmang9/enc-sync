@@ -13,6 +13,8 @@ NOAA publishes ENC updates **every weekday evening** (Monday–Friday).
 
 ## Build
 
+From source:
+
 ```bash
 cargo build --release
 ```
@@ -22,6 +24,20 @@ Install the binary wherever you like, for example:
 ```bash
 cargo install --path .
 ```
+
+### Prebuilt releases
+
+Tagged releases on GitHub include static Linux binaries (x86_64 and aarch64 musl), a
+macOS universal binary (Intel + Apple Silicon), and a Windows `.exe`. Download the
+archive for your platform from the [Releases](https://github.com/hoffmang9/enc-sync/releases)
+page.
+
+Each archive includes `RELEASE-INSTALL.md` with platform-specific install steps and
+notes on macOS Gatekeeper and Windows SmartScreen for unsigned binaries.
+
+To cut a release locally, bump the version, commit, tag (`git tag v0.1.0`), and push
+the tag. The [Release workflow](.github/workflows/release.yml) builds all targets and
+uploads them to the GitHub Release.
 
 ## Configure
 
