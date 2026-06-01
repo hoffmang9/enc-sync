@@ -1,0 +1,89 @@
+name: release-postbuild
+
+on:
+  workflow_call:
+    inputs:
+      release_version:
+        required: true
+        type: string
+      publishing:
+        required: true
+        type: string
+
+jobs:
+  package-macos-universal:
+    runs-on: macos-14
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download macOS per-arch build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*apple-darwin*
+          path: target/distrib/
+          merge-multiple: true
+
+      - id: combine
+        name: Combine macOS per-arch builds into universal binary
+        run: ./scripts/combine-macos-universal.sh
+
+      - name: Upload macOS universal archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-macos-universal
+          path: ${{ steps.combine.outputs.universal_archive }}
+
+  finalize-release-artifacts:
+    needs: package-macos-universal
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download Linux build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*-linux-musl
+          path: target/distrib/
+          merge-multiple: true
+
+      - name: Download Windows build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*windows*
+          path: target/distrib/
+          merge-multiple: true
+
+      - name: Download macOS universal archive
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts-macos-universal
+          path: target/distrib/
+
+      - name: Prepare release bundle
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: ./scripts/prepare-release-bundle.sh
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: enc-sync-${{ inputs.release_version }}
+          path: release-staging/
+
+      - name: Remove internal workflow artifacts
+        if: inputs.publishing != 'true'
+        env:
+          KEEP_ARTIFACT_NAME: enc-sync-${{ inputs.release_version }}
+        run: ./scripts/cleanup-workflow-artifacts.sh

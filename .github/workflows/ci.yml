@@ -27,6 +27,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Verify release workflow patches
+        run: ruby ./scripts/verify-release-workflow-patches.rb
+
       - name: Clippy
         env:
           RUSTFLAGS: -W rust-2024-compatibility
@@ -40,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-22.04-arm, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
 
@@ -65,3 +68,44 @@ jobs:
         run: |
           test "${{ needs.lint.result }}" = "success"
           test "${{ needs.test.result }}" = "success"
+
+  trigger-release:
+    name: Trigger release build
+    needs: ci
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.ci.result == 'success' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.payload.pull_request.head.sha;
+            const statusBase = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              context: 'release/enc-sync',
+            };
+
+            await github.rest.repos.createCommitStatus({
+              ...statusBase,
+              state: 'pending',
+              description: 'Release build queued',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/workflows/release.yml`,
+            });
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release.yml',
+              ref: context.payload.pull_request.head.ref,
+              inputs: {
+                pr_number: String(context.payload.pull_request.number),
+              },
+            });

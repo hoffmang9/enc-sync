@@ -13,6 +13,8 @@ NOAA publishes ENC updates **every weekday evening** (Monday–Friday).
 
 ## Build
 
+From source:
+
 ```bash
 cargo build --release
 ```
@@ -22,6 +24,44 @@ Install the binary wherever you like, for example:
 ```bash
 cargo install --path .
 ```
+
+### Prebuilt releases
+
+Tagged releases on GitHub include static Linux binaries (x86_64 and aarch64 musl), a
+macOS universal binary (Intel + Apple Silicon), and a Windows `.exe`. Download the
+archive for your platform from the [Releases](https://github.com/hoffmang9/enc-sync/releases)
+page.
+
+Release archives are versioned in the filename, for example
+`enc-sync-0.1.0-x86_64-unknown-linux-musl.tar.gz`.
+
+#### Pull request preview binaries
+
+PR binaries are **not** on the CI workflow run. After [CI](.github/workflows/ci.yml)
+passes, it dispatches the [Release workflow](.github/workflows/release.yml), which builds
+and uploads one workflow artifact with the four platform archives.
+
+1. Wait for the PR check **`release/enc-sync`** to turn green (Release can still be running
+   after CI is green).
+2. Open **Actions** → **Release** (not CI) → the run for your PR commit.
+3. Under **Artifacts**, download **`enc-sync-<version>-pr.<number>.<sha>`**. GitHub wraps
+   workflow artifact downloads in an extra `.zip`; unzip once to get the four
+   `enc-sync-*.tar.gz` / `.zip` files inside.
+
+Internal cargo-dist artifacts are removed when the run finishes — only the bundle above
+should remain on PR builds. Tag releases publish to GitHub Releases and leave no workflow
+artifacts.
+
+Release builds are not triggered for pull requests from repository forks (GitHub token
+scope).
+
+Each archive includes `RELEASE-INSTALL.md` with platform-specific install steps and
+notes on macOS Gatekeeper and Windows SmartScreen for unsigned binaries.
+
+To cut a release, bump the version in `Cargo.toml`, commit, merge to `main`, wait for CI
+to pass, then tag that commit and push the tag (`git tag v0.1.0 && git push origin v0.1.0`).
+The [Release workflow](.github/workflows/release.yml) verifies CI succeeded on the tagged
+commit, builds all targets, and uploads versioned files to the GitHub Release.
 
 ## Configure
 
