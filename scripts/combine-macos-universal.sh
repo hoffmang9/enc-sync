@@ -12,7 +12,7 @@ UNIVERSAL_TRIPLE="universal-apple-darwin"
 
 find_archive() {
   local triple=$1
-  find "$DISTRIB" -maxdepth 1 -type f -name "enc-sync-${triple}.tar.*" | head -1
+  find "$DISTRIB" -maxdepth 1 -type f -name "enc-sync-${triple}.tar.*" ! -name '*.sha256' | head -1
 }
 
 ARM_ARCHIVE="$(find_archive "$ARM_TRIPLE")"
