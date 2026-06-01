@@ -67,7 +67,10 @@ pub fn expand_path(path: &Path) -> Result<PathBuf> {
     let Some(raw) = path.to_str() else {
         return Ok(path.to_path_buf());
     };
-    if raw.contains('~') && home_dir().is_none() {
+    if !raw.starts_with('~') {
+        return Ok(path.to_path_buf());
+    }
+    if home_dir().is_none() {
         anyhow::bail!("cannot expand '{raw}': home directory is not set");
     }
     Ok(PathBuf::from(shellexpand::tilde(raw).into_owned()))
@@ -237,5 +240,13 @@ chart_dir = "{}"
             return;
         }
         assert!(expand_path(Path::new("~/Charts")).is_err());
+    }
+
+    #[test]
+    fn expand_path_leaves_non_leading_tilde_literal() {
+        let _home = crate::test_env::EnvGuard::clear_home_dirs();
+        let path = Path::new("/tmp/chart~archive");
+
+        assert_eq!(expand_path(path).unwrap(), path);
     }
 }

@@ -1,7 +1,7 @@
 //! RAII helpers for temporarily overriding process environment variables in tests.
 
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 static ENV_GUARD_LOCK: Mutex<()> = Mutex::new(());
@@ -26,6 +26,7 @@ fn restore_env(key: &str, value: Option<OsString>) {
 /// Saves and restores environment variables for the guard's lifetime.
 pub struct EnvGuard {
     saved: Vec<(String, Option<OsString>)>,
+    saved_cwd: Option<PathBuf>,
     _lock: MutexGuard<'static, ()>,
 }
 
@@ -57,7 +58,19 @@ impl EnvGuard {
         Self::save_and_set(&mut saved, "HOME", path);
         #[cfg(windows)]
         Self::save_and_set(&mut saved, "USERPROFILE", path);
-        Self { saved, _lock: lock }
+        Self {
+            saved,
+            saved_cwd: None,
+            _lock: lock,
+        }
+    }
+
+    /// Override home-related env vars and current directory under one process-global lock.
+    pub fn override_home_dirs_and_cwd(home: &Path, cwd: &Path) -> Self {
+        let mut guard = Self::override_home_dirs(home);
+        guard.saved_cwd = Some(std::env::current_dir().expect("current working directory"));
+        std::env::set_current_dir(cwd).expect("set current working directory");
+        guard
     }
 
     /// Unix-only: override `HOME` for tilde expansion tests.
@@ -66,7 +79,11 @@ impl EnvGuard {
         let lock = Self::acquire_lock();
         let mut saved = Vec::new();
         Self::save_and_set(&mut saved, "HOME", path);
-        Self { saved, _lock: lock }
+        Self {
+            saved,
+            saved_cwd: None,
+            _lock: lock,
+        }
     }
 
     /// Clear home-related env vars to simulate a missing home directory.
@@ -76,12 +93,19 @@ impl EnvGuard {
         Self::save_and_remove(&mut saved, "HOME");
         #[cfg(windows)]
         Self::save_and_remove(&mut saved, "USERPROFILE");
-        Self { saved, _lock: lock }
+        Self {
+            saved,
+            saved_cwd: None,
+            _lock: lock,
+        }
     }
 }
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
+        if let Some(cwd) = self.saved_cwd.take() {
+            let _ = std::env::set_current_dir(cwd);
+        }
         for (key, value) in self.saved.drain(..) {
             restore_env(&key, value);
         }

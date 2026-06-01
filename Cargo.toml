@@ -30,9 +30,9 @@ zip = "2"
 filetime = "0.2"
 shellexpand = "3"
 dirs = "6"
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 tiny_http = "0.12"
 
 # The profile that 'dist' will build with
