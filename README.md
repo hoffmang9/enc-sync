@@ -15,7 +15,8 @@ NOAA publishes ENC updates **every weekday evening** (Monday–Friday).
 
 ### Prebuilt releases
 
-Tagged releases on GitHub include static Linux binaries (x86_64 and aarch64 musl), a
+Tagged releases on GitHub include static Linux binaries (x86_64 and aarch64 musl, including
+Raspberry Pi), a
 macOS universal binary (Intel + Apple Silicon), and a Windows `.exe`. Download the
 archive for your platform from the
 [Releases](https://github.com/hoffmang9/enc-sync/releases) page.
