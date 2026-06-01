@@ -71,10 +71,10 @@ jobs:
 
   trigger-release:
     name: Trigger release build
-    needs: ci
+    needs: lint
     if: >-
       github.event_name == 'pull_request' &&
-      needs.ci.result == 'success' &&
+      needs.lint.result == 'success' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:

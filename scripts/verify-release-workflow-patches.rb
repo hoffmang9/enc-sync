@@ -77,6 +77,12 @@ end
 
 trigger_release = ci_jobs["trigger-release"] or errors << "ci.yml missing trigger-release job"
 if trigger_release
+  unless Array(trigger_release["needs"]).include?("lint") || trigger_release["needs"] == "lint"
+    errors << "ci.yml trigger-release must need lint so release builds start after lint"
+  end
+  if Array(trigger_release["needs"]).include?("ci") || trigger_release["needs"] == "ci"
+    errors << "ci.yml trigger-release must not wait for full CI"
+  end
   unless ci_text.include?("createWorkflowDispatch")
     errors << "ci.yml trigger-release must dispatch Release via createWorkflowDispatch"
   end
@@ -165,6 +171,19 @@ if build_global
   end
 end
 
+require_ci = jobs["require-ci-success"] or errors << "missing require-ci-success job"
+if require_ci
+  unless require_ci["if"].to_s.include?("workflow_dispatch")
+    errors << "require-ci-success must run for workflow_dispatch PR release builds"
+  end
+  unless step_runs?(require_ci["steps"], "require-ci-success-on-commit.sh")
+    errors << "require-ci-success must run require-ci-success-on-commit.sh"
+  end
+  unless require_ci.dig("env", "WAIT_FOR_CI_SECONDS").to_s != ""
+    errors << "require-ci-success must wait for CI completion"
+  end
+end
+
 postbuild = jobs["custom-release-postbuild"] or errors << "missing custom-release-postbuild job"
 if postbuild
   inputs = postbuild.dig("with") || {}
@@ -176,6 +195,13 @@ if postbuild
   end
   unless postbuild.dig("uses").to_s.include?("release-postbuild.yml")
     errors << "custom-release-postbuild must call release-postbuild.yml"
+  end
+  needs = Array(postbuild["needs"])
+  unless needs.include?("require-ci-success")
+    errors << "custom-release-postbuild must wait for require-ci-success before publishing artifacts"
+  end
+  unless postbuild["if"].to_s.include?("require-ci-success")
+    errors << "custom-release-postbuild if condition must require CI success on PR releases"
   end
   unless permission_value(postbuild["permissions"], "actions") == "write"
     errors << "custom-release-postbuild must grant actions: write for PR artifact cleanup"
