@@ -3,7 +3,7 @@ name = "enc-sync"
 version = "0.1.0"
 edition = "2021"
 description = "Sync NOAA ENC charts for OpenCPN with optional area filters"
-license = "GPL-2.0-or-later"
+license = "Apache-2.0"
 
 [[bin]]
 name = "enc-sync"

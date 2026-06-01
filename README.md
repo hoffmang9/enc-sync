@@ -74,4 +74,4 @@ On most days nothing will have changed and the run exits quickly.
 
 ## License
 
-GPL-2.0-or-later
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
