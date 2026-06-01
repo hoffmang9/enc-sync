@@ -41,9 +41,9 @@ pub fn load_config(path: &Path) -> Result<Config> {
     Ok(config)
 }
 
-pub fn validate_chart_dir(path: &Path) -> Result<PathBuf> {
+fn validate_chart_dir(path: &Path) -> Result<PathBuf> {
     let expanded = expand_path(path)?;
-    if expanded.as_os_str().is_empty() {
+    if chart_dir_is_blank(&expanded) {
         bail!("chart_dir must not be empty");
     }
     if expanded.is_file() {
@@ -52,15 +52,20 @@ pub fn validate_chart_dir(path: &Path) -> Result<PathBuf> {
             expanded.display()
         );
     }
-    if !expanded.is_dir() {
-        fs::create_dir_all(&expanded).with_context(|| {
-            format!(
-                "creating chart directory {}",
-                expanded.display()
-            )
-        })?;
-    }
     Ok(expanded)
+}
+
+pub(crate) fn prepare_chart_dir(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| {
+        format!(
+            "creating chart directory {}",
+            path.display()
+        )
+    })
+}
+
+fn chart_dir_is_blank(path: &Path) -> bool {
+    path.as_os_str().is_empty() || path.to_str().is_some_and(|s| s.trim().is_empty())
 }
 
 pub fn expand_path(path: &Path) -> Result<PathBuf> {
@@ -139,6 +144,10 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn toml_path(path: &Path) -> String {
+        path.display().to_string().replace('\\', "/")
+    }
+
     #[test]
     fn load_config_expands_tilde_in_chart_dir() {
         let dir = TempDir::new().unwrap();
@@ -183,7 +192,7 @@ regions = ["14"]
 coast_guard_districts = ["11"]
 restart_opencpn = false
 "#,
-                chart_dir.display().to_string().replace('\\', "/")
+                toml_path(&chart_dir)
             ),
         )
         .unwrap();
@@ -212,7 +221,20 @@ restart_opencpn = false
     }
 
     #[test]
-    fn load_config_creates_missing_chart_dir() {
+    fn load_config_rejects_whitespace_chart_dir() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, r#"chart_dir = "   ""#).unwrap();
+
+        let error = load_config(&path).unwrap_err();
+        assert!(
+            error.to_string().contains("chart_dir must not be empty"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn load_config_accepts_missing_chart_dir() {
         let dir = TempDir::new().unwrap();
         let chart_dir = dir.path().join("Charts/ENC/US");
         assert!(!chart_dir.exists());
@@ -224,13 +246,23 @@ restart_opencpn = false
                 r#"
 chart_dir = "{}"
 "#,
-                chart_dir.display().to_string().replace('\\', "/")
+                toml_path(&chart_dir)
             ),
         )
         .unwrap();
 
         let config = load_config(&path).unwrap();
         assert_eq!(config.chart_dir, chart_dir);
+        assert!(!chart_dir.exists());
+    }
+
+    #[test]
+    fn prepare_chart_dir_creates_missing_path() {
+        let dir = TempDir::new().unwrap();
+        let chart_dir = dir.path().join("Charts/ENC/US");
+        assert!(!chart_dir.exists());
+
+        prepare_chart_dir(&chart_dir).unwrap();
         assert!(chart_dir.is_dir());
     }
 
@@ -247,7 +279,7 @@ chart_dir = "{}"
                 r#"
 chart_dir = "{}"
 "#,
-                chart_path.display().to_string().replace('\\', "/")
+                toml_path(&chart_path)
             ),
         )
         .unwrap();
