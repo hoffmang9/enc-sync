@@ -88,7 +88,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'release.yml',
-              ref: context.payload.pull_request.head.sha,
+              ref: context.payload.pull_request.head.ref,
               inputs: {
                 pr_number: String(context.payload.pull_request.number),
               },
