@@ -82,8 +82,26 @@ See enc-sync.example.toml for configuration options.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::{OsStr, OsString};
     use std::fs;
     use tempfile::TempDir;
+
+    fn set_env(key: &str, value: impl AsRef<OsStr>) {
+        // SAFETY: tests are single-threaded and restore previous env before returning.
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env(key: &str) {
+        // SAFETY: tests are single-threaded and restore previous env before returning.
+        unsafe { std::env::remove_var(key) }
+    }
+
+    fn restore_env(key: &str, value: Option<OsString>) {
+        match value {
+            Some(v) => set_env(key, v),
+            None => remove_env(key),
+        }
+    }
 
     #[test]
     fn discover_config_path_prefers_local_enc_sync_toml() {
@@ -95,9 +113,9 @@ mod tests {
         #[cfg(windows)]
         let saved_profile = std::env::var_os("USERPROFILE");
         let home = TempDir::new().unwrap();
-        std::env::set_var("HOME", home.path());
+        set_env("HOME", home.path());
         #[cfg(windows)]
-        std::env::set_var("USERPROFILE", home.path());
+        set_env("USERPROFILE", home.path());
         let home_config = home.path().join(HOME_CONFIG_REL);
         fs::create_dir_all(home_config.parent().unwrap()).unwrap();
         fs::write(&home_config, "chart_dir = \"/other\"\n").unwrap();
@@ -106,16 +124,9 @@ mod tests {
         std::env::set_current_dir(dir.path()).unwrap();
         let discovered = discover_config_path();
         std::env::set_current_dir(saved_cwd).unwrap();
-        if let Some(prev) = saved_home {
-            std::env::set_var("HOME", prev);
-        } else {
-            std::env::remove_var("HOME");
-        }
+        restore_env("HOME", saved_home);
         #[cfg(windows)]
-        match saved_profile {
-            Some(prev) => std::env::set_var("USERPROFILE", prev),
-            None => std::env::remove_var("USERPROFILE"),
-        }
+        restore_env("USERPROFILE", saved_profile);
 
         assert_eq!(discovered, Some(PathBuf::from("enc-sync.toml")));
     }

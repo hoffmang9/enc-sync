@@ -67,7 +67,8 @@ pub fn run(config: &Config) -> Result<()> {
     } else {
         log::info!("Downloading {} updated or new cells", pending.len());
         for cell in pending {
-            match download_cell(&config.chart_dir, &cell) {
+            let result = download_cell(&config.chart_dir, &cell);
+            match result {
                 Ok(()) => {
                     update_data.insert(cell_key(&cell.name), cell.timestamp);
                     updated += 1;

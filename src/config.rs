@@ -80,8 +80,18 @@ pub fn home_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod test_home {
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
     use std::path::Path;
+
+    fn set_env(key: &str, value: impl AsRef<OsStr>) {
+        // SAFETY: tests are single-threaded and restore previous env on drop.
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env(key: &str) {
+        // SAFETY: tests are single-threaded and restore previous env on drop.
+        unsafe { std::env::remove_var(key) }
+    }
 
     pub struct Guard {
         saved_home: Option<OsString>,
@@ -90,27 +100,20 @@ mod test_home {
     }
 
     impl Guard {
+        #[cfg(not(windows))]
         pub fn set(path: &Path) -> Self {
             let saved_home = std::env::var_os("HOME");
-            #[cfg(windows)]
-            let saved_profile = std::env::var_os("USERPROFILE");
-            std::env::set_var("HOME", path);
-            #[cfg(windows)]
-            std::env::set_var("USERPROFILE", path);
-            Self {
-                saved_home,
-                #[cfg(windows)]
-                saved_profile,
-            }
+            set_env("HOME", path);
+            Self { saved_home }
         }
 
         pub fn clear() -> Self {
             let saved_home = std::env::var_os("HOME");
             #[cfg(windows)]
             let saved_profile = std::env::var_os("USERPROFILE");
-            std::env::remove_var("HOME");
+            remove_env("HOME");
             #[cfg(windows)]
-            std::env::remove_var("USERPROFILE");
+            remove_env("USERPROFILE");
             Self {
                 saved_home,
                 #[cfg(windows)]
@@ -129,8 +132,8 @@ mod test_home {
 
     fn restore(key: &str, value: Option<OsString>) {
         match value {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
+            Some(v) => set_env(key, v),
+            None => remove_env(key),
         }
     }
 }

@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::io::{Cursor, Write};
 use std::net::TcpListener;
 use std::path::Path;
@@ -9,44 +8,50 @@ use std::thread::{self, JoinHandle};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-pub struct TestHome {
-    saved_home: Option<OsString>,
-    #[cfg(windows)]
-    saved_profile: Option<OsString>,
-}
+#[cfg(not(windows))]
+mod test_home {
+    use std::ffi::{OsStr, OsString};
+    use std::path::Path;
 
-impl TestHome {
-    pub fn set(path: &Path) -> Self {
-        let saved_home = std::env::var_os("HOME");
-        #[cfg(windows)]
-        let saved_profile = std::env::var_os("USERPROFILE");
-        std::env::set_var("HOME", path);
-        #[cfg(windows)]
-        std::env::set_var("USERPROFILE", path);
-        Self {
-            saved_home,
-            #[cfg(windows)]
-            saved_profile,
+    fn set_env(key: &str, value: impl AsRef<OsStr>) {
+        // SAFETY: tests are single-threaded and restore previous env on drop.
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env(key: &str) {
+        // SAFETY: tests are single-threaded and restore previous env on drop.
+        unsafe { std::env::remove_var(key) }
+    }
+
+    fn restore_env(key: &str, value: Option<OsString>) {
+        match value {
+            Some(v) => set_env(key, v),
+            None => remove_env(key),
+        }
+    }
+
+    pub struct TestHome {
+        saved_home: Option<OsString>,
+    }
+
+    impl TestHome {
+        pub fn set(path: &Path) -> Self {
+            let saved_home = std::env::var_os("HOME");
+            set_env("HOME", path);
+            Self { saved_home }
+        }
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            restore_env("HOME", self.saved_home.take());
         }
     }
 }
 
-impl Drop for TestHome {
-    fn drop(&mut self) {
-        restore_env("HOME", self.saved_home.take());
-        #[cfg(windows)]
-        restore_env("USERPROFILE", self.saved_profile.take());
-    }
-}
+#[cfg(not(windows))]
+pub use test_home::TestHome;
 
-fn restore_env(key: &str, value: Option<OsString>) {
-    match value {
-        Some(v) => std::env::set_var(key, v),
-        None => std::env::remove_var(key),
-    }
-}
-
-/// Format a path for embedding in a TOML basic string (forward slashes, no escapes).
 pub fn toml_path(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
 }
