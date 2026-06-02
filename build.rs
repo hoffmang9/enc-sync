@@ -8,10 +8,9 @@ use quick_xml::Reader;
 #[path = "src/source_taxonomy.rs"]
 mod source_taxonomy;
 
-use source_taxonomy::recognized_enc_folder;
+use source_taxonomy::{folder_from_opencpn_dir, recognized_enc_folder};
 
 const OPENCPN_SOURCES_XML: &str = include_str!("data/opencpn_enc_sources.xml");
-const USERDATA_PREFIX: &str = "{USERDATA}/";
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
@@ -108,8 +107,7 @@ fn parse_sources(xml: &str) -> Result<Vec<SourceRecord>, String> {
 }
 
 fn build_record(name: String, location: String, dir: String) -> Option<SourceRecord> {
-    let rel = dir.strip_prefix(USERDATA_PREFIX)?.trim_start_matches('/');
-    let folder = rel.rsplit('/').next()?.to_string();
+    let folder = folder_from_opencpn_dir(&dir)?.to_string();
     if !recognized_enc_folder(&folder) {
         return None;
     }

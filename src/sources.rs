@@ -206,25 +206,6 @@ mod tests {
 
     const OPENCPN_SOURCES_XML: &str = include_str!("../data/opencpn_enc_sources.xml");
 
-    fn folder_from_catalog_dir(dir: &str) -> Option<&str> {
-        const PREFIX: &str = "{USERDATA}/";
-        let rel = dir.strip_prefix(PREFIX)?.trim_start_matches('/');
-        rel.rsplit('/').next()
-    }
-
-    fn recognized_catalog_count_in_xml(xml: &str) -> usize {
-        use crate::source_taxonomy::recognized_enc_folder;
-
-        xml.lines()
-            .filter_map(|line| {
-                let line = line.trim();
-                let dir = line.strip_prefix("<dir>")?.strip_suffix("</dir>")?;
-                let folder = folder_from_catalog_dir(dir)?;
-                recognized_enc_folder(folder).then_some(())
-            })
-            .count()
-    }
-
     fn test_config(chart_dir: PathBuf) -> Config {
         Config {
             chart_dir,
@@ -246,10 +227,9 @@ mod tests {
 
     #[test]
     fn embedded_source_count_matches_opencpn_xml() {
-        assert_eq!(
-            all_chart_sources().len(),
-            recognized_catalog_count_in_xml(OPENCPN_SOURCES_XML)
-        );
+        let count =
+            crate::source_taxonomy::count_recognized_catalogs_in_xml(OPENCPN_SOURCES_XML).unwrap();
+        assert_eq!(all_chart_sources().len(), count);
     }
 
     #[test]

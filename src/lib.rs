@@ -34,9 +34,10 @@ mod sources;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_env;
 
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::thread;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 
 pub use catalog::{parse_catalog, Cell};
 pub use config::{home_dir, load_config, Config};
@@ -46,7 +47,7 @@ use charts::{
     cell_key, download_catalog, download_cell, load_update_data, needs_update, save_update_data,
 };
 use config::prepare_chart_dir;
-use logging::routine;
+use logging::{routine, LogOptions};
 use opencpn::restart_opencpn;
 use sources::{enc_root, select_sources};
 
@@ -71,6 +72,7 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     let enc_root = enc_root(config);
     prepare_chart_dir(&enc_root)?;
     let selected = select_sources(config)?;
+    let log = LogOptions::from(options);
 
     if let Some(summary) = selected.minimum_summary {
         log::info!("Config minimum: {summary}");
@@ -95,18 +97,26 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
                 .iter()
                 .map(|source| {
                     scope.spawn(|| {
-                        routine(
-                            options.into(),
-                            &format!("Source {} → {}", source.name, source.folder),
-                        );
-                        let result = sync_source(config, &enc_root, source, options);
-                        (source.folder, result)
+                        let folder = source.folder;
+                        let result = catch_unwind(AssertUnwindSafe(|| {
+                            routine(log, &format!("Source {} → {}", source.name, source.folder));
+                            sync_source(config, &enc_root, source, options)
+                        }))
+                        .unwrap_or_else(|_| Err(anyhow!("sync worker panicked for {folder}")));
+                        (folder, result)
                     })
                 })
                 .collect();
 
             for handle in handles {
-                let (folder, result) = handle.join().unwrap();
+                let (folder, result) = match handle.join() {
+                    Ok(pair) => pair,
+                    Err(_) => {
+                        log::error!("Sync worker thread panicked");
+                        failed.push("<panicked>".to_string());
+                        continue;
+                    }
+                };
                 match result {
                     Ok(count) => updated += count,
                     Err(error) => {
@@ -119,10 +129,7 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     }
 
     if options.catalog_only {
-        routine(
-            options.into(),
-            "Catalog-only mode; skipping OpenCPN restart",
-        );
+        routine(log, "Catalog-only mode; skipping OpenCPN restart");
         return finalize(failed);
     }
 
@@ -141,6 +148,7 @@ fn sync_source(
     source: &ChartSource,
     options: RunOptions,
 ) -> Result<usize> {
+    let log = LogOptions::from(options);
     let chart_dir = source.chart_dir(enc_root);
     prepare_chart_dir(&chart_dir)?;
 
@@ -148,7 +156,7 @@ fn sync_source(
         &source.resolve_catalog_url(config),
         &chart_dir,
         source.catalog_filename,
-        options.into(),
+        log,
     )?;
 
     if options.catalog_only {
@@ -157,7 +165,7 @@ fn sync_source(
 
     let cells = parse_catalog(&catalog_path)?;
     routine(
-        options.into(),
+        log,
         &format!(
             "{} lists {} chart cells",
             source.catalog_filename,
@@ -173,7 +181,7 @@ fn sync_source(
 
     if pending.is_empty() {
         routine(
-            options.into(),
+            log,
             &format!("All cells up to date in {}", chart_dir.display()),
         );
         return Ok(0);
