@@ -118,6 +118,7 @@ fn catalog_only_downloads_catalog_without_cells() {
         &config,
         RunOptions {
             catalog_only: true,
+            ..Default::default()
         },
     )
     .expect("catalog-only sync");
@@ -156,6 +157,7 @@ fn catalog_only_overwrites_stale_local_catalog() {
         &config,
         RunOptions {
             catalog_only: true,
+            ..Default::default()
         },
     )
     .expect("catalog-only sync");

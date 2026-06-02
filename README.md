@@ -166,10 +166,12 @@ overwriting any local copy, without downloading chart cells or restarting OpenCP
 Use an explicit path to the machine-wide config:
 
 ```cron
-0 23 * * 1-5 enc-sync --config ~/.enc-sync/config.toml >>/tmp/enc-sync.log 2>&1
+0 23 * * 1-5 enc-sync --config ~/.enc-sync/config.toml --cron >>/tmp/enc-sync.log 2>&1
 ```
 
-On most days nothing will have changed and the run exits quickly.
+With `--cron`, routine per-source progress moves to debug while errors, the source
+list summary, and actual cell downloads stay at info. On most days nothing will have
+changed and the run exits quietly.
 
 ## OpenCPN integration
 

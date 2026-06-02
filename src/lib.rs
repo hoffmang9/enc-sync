@@ -16,7 +16,7 @@
 //!
 //! NOAA publishes ENC updates every weekday evening; run after that (most days
 //! the binary exits quickly when nothing changed). Example cron:
-//!   0 23 * * 1-5 enc-sync --config ~/.enc-sync/config.toml \
+//!   0 23 * * 1-5 enc-sync --config ~/.enc-sync/config.toml --cron \
 //!     >>/tmp/enc-sync.log 2>&1
 //!
 //! Chart folders follow OpenCPN Chart Downloader defaults under
@@ -27,10 +27,11 @@ mod catalog;
 mod charts;
 mod config;
 mod opencpn;
+mod source_kind;
 mod source_norm;
-#[allow(dead_code)] // consumed by build.rs; tested from the library crate
-#[path = "source_folder.rs"]
-mod source_folder;
+#[allow(dead_code)] // `source_kind_rust_expr_for_folder` is used by build.rs
+#[path = "source_taxonomy.rs"]
+mod source_taxonomy;
 mod sources;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_env;
@@ -39,6 +40,7 @@ use anyhow::{bail, Result};
 
 pub use catalog::{parse_catalog, Cell};
 pub use config::{home_dir, load_config, Config};
+pub use source_kind::SourceKind;
 pub use sources::ChartSource;
 
 use charts::{
@@ -54,6 +56,22 @@ pub struct RunOptions {
     /// Download catalogs for selected sources, but do not download chart cells
     /// or restart OpenCPN.
     pub catalog_only: bool,
+    /// Reduce routine progress logs for cron; errors and download activity stay at info.
+    pub cron: bool,
+}
+
+/// Log at info by default; in cron mode, `detail` messages drop to debug.
+macro_rules! run_log {
+    ($options:expr, info, $($arg:tt)*) => {
+        log::info!($($arg)*)
+    };
+    ($options:expr, detail, $($arg:tt)*) => {
+        if $options.cron {
+            log::debug!($($arg)*);
+        } else {
+            log::info!($($arg)*);
+        }
+    };
 }
 
 pub fn run(config: &Config) -> Result<()> {
@@ -66,9 +84,11 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     let sources = select_sources(config)?;
 
     if let Some(summary) = config_minimum_summary(config) {
-        log::info!("Config minimum: {summary}");
+        run_log!(options, info, "Config minimum: {summary}");
     }
-    log::info!(
+    run_log!(
+        options,
+        info,
         "Syncing {} chart source(s): {}",
         sources.len(),
         sources
@@ -82,7 +102,13 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     let mut updated = 0usize;
 
     for source in &sources {
-        log::info!("Source {} → {}", source.name, source.folder);
+        run_log!(
+            options,
+            detail,
+            "Source {} → {}",
+            source.name,
+            source.folder
+        );
         match sync_source(config, &enc_root, source, options) {
             Ok(count) => updated += count,
             Err(error) => {
@@ -93,14 +119,14 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     }
 
     if options.catalog_only {
-        log::info!("Catalog-only mode; skipping OpenCPN restart");
+        run_log!(options, detail, "Catalog-only mode; skipping OpenCPN restart");
         return finalize(failed);
     }
 
     if updated > 0 && config.restart_opencpn {
         restart_opencpn(config.rebuild_chart_db)?;
     } else if updated == 0 {
-        log::info!("No chart files changed; leaving OpenCPN running");
+        run_log!(options, info, "No chart files changed; leaving OpenCPN running");
     }
 
     finalize(failed)
@@ -119,6 +145,7 @@ fn sync_source(
         &source.resolve_catalog_url(config),
         &chart_dir,
         source.catalog_filename,
+        options.cron,
     )?;
 
     if options.catalog_only {
@@ -126,7 +153,9 @@ fn sync_source(
     }
 
     let cells = parse_catalog(&catalog_path)?;
-    log::info!(
+    run_log!(
+        options,
+        detail,
         "{} lists {} chart cells",
         source.catalog_filename,
         cells.len()
@@ -139,7 +168,12 @@ fn sync_source(
         .collect();
 
     if pending.is_empty() {
-        log::info!("All cells up to date in {}", chart_dir.display());
+        run_log!(
+            options,
+            detail,
+            "All cells up to date in {}",
+            chart_dir.display()
+        );
         return Ok(0);
     }
 

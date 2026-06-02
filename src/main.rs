@@ -28,7 +28,11 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let (config_path, options) = parse_args()?;
-    log::info!("Using config {}", config_path.display());
+    if options.cron {
+        log::debug!("Using config {}", config_path.display());
+    } else {
+        log::info!("Using config {}", config_path.display());
+    }
     let config = load_config(&config_path)?;
     run_with_options(&config, options)
 }
@@ -63,6 +67,10 @@ fn parse_args() -> Result<(PathBuf, RunOptions)> {
                 options.catalog_only = true;
                 index += 1;
             }
+            "--cron" => {
+                options.cron = true;
+                index += 1;
+            }
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -91,11 +99,12 @@ fn help_text() -> &'static str {
     r#"enc-sync -- Sync NOAA ENC charts for OpenCPN
 
 Usage:
-  enc-sync [--config /path/to/enc-sync.toml] [--catalog-only]
+  enc-sync [--config /path/to/enc-sync.toml] [--catalog-only] [--cron]
 
 Options:
   --config PATH    Config file (default: ./enc-sync.toml, then ~/.enc-sync/config.toml)
   --catalog-only   Download latest catalogs only; do not download chart cells or restart OpenCPN
+  --cron           Quieter routine progress logs for cron (errors and downloads stay at info)
 
 Chart folders mirror OpenCPN Chart Downloader defaults under chart_dir/ENC/
 (US_CA, US_OR, US_REGION14, US_CGD13, US, US_INLAND, …).

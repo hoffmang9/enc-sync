@@ -5,20 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use crate::config::Config;
+use crate::source_kind::SourceKind;
 use crate::source_norm::normalize_numeric_code;
 
 include!(concat!(env!("OUT_DIR"), "/sources_generated.rs"));
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SourceKind {
-    All,
-    State(&'static str),
-    Region(&'static str),
-    CoastGuardDistrict(&'static str),
-    InlandMain,
-    InlandBuoys,
-    InlandOverlays,
-}
 
 #[derive(Debug, Clone)]
 pub struct ChartSource {
@@ -93,6 +83,33 @@ impl SourceSelection {
             }
         }
     }
+
+    fn summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if !self.states.is_empty() {
+            parts.push(format!("states [{}]", join_sorted(&self.states)));
+        }
+        if !self.regions.is_empty() {
+            parts.push(format!("regions [{}]", join_sorted(&self.regions)));
+        }
+        if !self.coast_guard_districts.is_empty() {
+            parts.push(format!(
+                "CG districts [{}]",
+                join_sorted(&self.coast_guard_districts)
+            ));
+        }
+        if self.all_enc {
+            parts.push("ENC/US".to_string());
+        }
+        if self.inland {
+            parts.push("US Army Corps inland".to_string());
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("; "))
+        }
+    }
 }
 
 pub fn enc_root(config: &Config) -> PathBuf {
@@ -104,34 +121,12 @@ pub fn enc_root(config: &Config) -> PathBuf {
 }
 
 pub fn all_chart_sources() -> &'static [ChartSource] {
+    let _ = EMBEDDED_SOURCE_COUNT;
     EMBEDDED_SOURCES
 }
 
 pub fn config_minimum_summary(config: &Config) -> Option<String> {
-    let mut parts = Vec::new();
-    if !config.states.is_empty() {
-        parts.push(format!("states [{}]", config.states.join(", ")));
-    }
-    if !config.regions.is_empty() {
-        parts.push(format!("regions [{}]", config.regions.join(", ")));
-    }
-    if !config.coast_guard_districts.is_empty() {
-        parts.push(format!(
-            "CG districts [{}]",
-            config.coast_guard_districts.join(", ")
-        ));
-    }
-    if config.all_enc {
-        parts.push("ENC/US".to_string());
-    }
-    if config.inland {
-        parts.push("US Army Corps inland".to_string());
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("; "))
-    }
+    SourceSelection::from_config(config).summary()
 }
 
 pub fn select_sources(config: &Config) -> Result<Vec<ChartSource>> {
@@ -186,6 +181,12 @@ fn normalize_codes(values: &[String]) -> HashSet<String> {
         .collect()
 }
 
+fn join_sorted(values: &HashSet<String>) -> String {
+    let mut sorted: Vec<_> = values.iter().cloned().collect();
+    sorted.sort();
+    sorted.join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,12 +195,30 @@ mod tests {
     #[test]
     fn embedded_sources_include_wa_or_ca_and_inland() {
         let sources = all_chart_sources();
-        assert_eq!(sources.len(), 68);
+        assert_eq!(sources.len(), EMBEDDED_SOURCE_COUNT);
         assert!(sources.iter().any(|s| s.folder == "US_CA"));
         assert!(sources.iter().any(|s| s.folder == "US_OR"));
         assert!(sources.iter().any(|s| s.folder == "US_WA"));
         assert!(sources.iter().any(|s| s.folder == "US_INLAND"));
         assert!(sources.iter().any(|s| s.folder == "US"));
+    }
+
+    #[test]
+    fn config_minimum_summary_uses_normalized_codes() {
+        let config = Config {
+            chart_dir: PathBuf::from("/charts"),
+            states: vec![],
+            regions: vec!["01".into()],
+            coast_guard_districts: vec!["11".into()],
+            all_enc: false,
+            inland: false,
+            catalog_base_url: None,
+            restart_opencpn: false,
+            rebuild_chart_db: false,
+        };
+        let summary = config_minimum_summary(&config).unwrap();
+        assert!(summary.contains("regions [1]"));
+        assert!(summary.contains("CG districts [11]"));
     }
 
     #[test]
@@ -286,5 +305,4 @@ mod tests {
         let folders: Vec<_> = selected.iter().map(|s| s.folder).collect();
         assert_eq!(folders, vec!["US_CA", "US_OR"]);
     }
-
 }

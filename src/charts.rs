@@ -135,16 +135,25 @@ pub(crate) fn download_catalog(
     catalog_url: &str,
     chart_dir: &Path,
     catalog_filename: &str,
+    cron: bool,
 ) -> Result<PathBuf> {
     let catalog_path = chart_dir.join(catalog_filename);
 
-    log::info!("Downloading catalog {}", catalog_url);
+    if cron {
+        log::debug!("Downloading catalog {catalog_url}");
+    } else {
+        log::info!("Downloading catalog {catalog_url}");
+    }
     let catalog_url = catalog_url.to_string();
     write_atomically(&catalog_path, |file| {
         file.write_all(&fetch_url(&catalog_url)?)?;
         Ok(())
     })?;
-    log::info!("Catalog saved to {}", catalog_path.display());
+    if cron {
+        log::debug!("Catalog saved to {}", catalog_path.display());
+    } else {
+        log::info!("Catalog saved to {}", catalog_path.display());
+    }
     Ok(catalog_path)
 }
 
