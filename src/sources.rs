@@ -107,6 +107,33 @@ pub fn all_chart_sources() -> &'static [ChartSource] {
     EMBEDDED_SOURCES
 }
 
+pub fn config_minimum_summary(config: &Config) -> Option<String> {
+    let mut parts = Vec::new();
+    if !config.states.is_empty() {
+        parts.push(format!("states [{}]", config.states.join(", ")));
+    }
+    if !config.regions.is_empty() {
+        parts.push(format!("regions [{}]", config.regions.join(", ")));
+    }
+    if !config.coast_guard_districts.is_empty() {
+        parts.push(format!(
+            "CG districts [{}]",
+            config.coast_guard_districts.join(", ")
+        ));
+    }
+    if config.all_enc {
+        parts.push("ENC/US".to_string());
+    }
+    if config.inland {
+        parts.push("US Army Corps inland".to_string());
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
 pub fn select_sources(config: &Config) -> Result<Vec<ChartSource>> {
     let selection = SourceSelection::from_config(config);
     let enc_root = enc_root(config);

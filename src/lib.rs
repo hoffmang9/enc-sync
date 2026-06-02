@@ -46,7 +46,7 @@ use charts::{
 };
 use config::prepare_chart_dir;
 use opencpn::restart_opencpn;
-use sources::{enc_root, select_sources};
+use sources::{config_minimum_summary, enc_root, select_sources};
 
 /// Controls whether enc-sync downloads chart cells or only refreshes catalogs.
 #[derive(Debug, Clone, Copy, Default)]
@@ -166,32 +166,5 @@ fn finalize(failed: Vec<String>) -> Result<()> {
         Ok(())
     } else {
         bail!("{} chart source(s) failed: {}", failed.len(), failed.join(", "))
-    }
-}
-
-fn config_minimum_summary(config: &Config) -> Option<String> {
-    let mut parts = Vec::new();
-    if !config.states.is_empty() {
-        parts.push(format!("states [{}]", config.states.join(", ")));
-    }
-    if !config.regions.is_empty() {
-        parts.push(format!("regions [{}]", config.regions.join(", ")));
-    }
-    if !config.coast_guard_districts.is_empty() {
-        parts.push(format!(
-            "CG districts [{}]",
-            config.coast_guard_districts.join(", ")
-        ));
-    }
-    if config.all_enc {
-        parts.push("ENC/US".to_string());
-    }
-    if config.inland {
-        parts.push("US Army Corps inland".to_string());
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("; "))
     }
 }
