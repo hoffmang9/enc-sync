@@ -2,7 +2,18 @@
 
 use crate::RunOptions;
 
-pub fn routine(options: RunOptions, message: &str) {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LogOptions {
+    pub cron: bool,
+}
+
+impl From<RunOptions> for LogOptions {
+    fn from(options: RunOptions) -> Self {
+        Self { cron: options.cron }
+    }
+}
+
+pub fn routine(options: LogOptions, message: &str) {
     if options.cron {
         log::debug!("{message}");
     } else {

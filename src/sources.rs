@@ -6,11 +6,11 @@ use anyhow::{bail, Context, Result};
 
 use crate::config::Config;
 use crate::source_norm::normalize_numeric_code;
-use crate::source_taxonomy::{folder_matches_selection, SelectionCriteria};
+use crate::source_taxonomy::{classify_enc_folder, EncFolderClass};
 
 include!(concat!(env!("OUT_DIR"), "/sources_generated.rs"));
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ChartSource {
     pub name: &'static str,
     pub catalog_url: &'static str,
@@ -73,18 +73,22 @@ impl SourceSelection {
         }
     }
 
-    fn criteria(&self) -> SelectionCriteria<'_> {
-        SelectionCriteria {
-            states: &self.states,
-            regions: &self.regions,
-            coast_guard_districts: &self.coast_guard_districts,
-            all_enc: self.all_enc,
-            inland: self.inland,
+    fn matches_folder(&self, folder: &str) -> bool {
+        let Some((class, code)) = classify_enc_folder(folder) else {
+            return false;
+        };
+        match class {
+            EncFolderClass::All => self.all_enc,
+            EncFolderClass::Inland => self.inland,
+            EncFolderClass::State => {
+                let code = code.trim().to_ascii_uppercase();
+                self.states.contains(&code)
+            }
+            EncFolderClass::Region => self.regions.contains(&normalize_numeric_code(code)),
+            EncFolderClass::CoastGuardDistrict => self
+                .coast_guard_districts
+                .contains(&normalize_numeric_code(code)),
         }
-    }
-
-    fn configured(&self, folder: &str) -> bool {
-        folder_matches_selection(folder, &self.criteria())
     }
 
     fn summary(&self) -> Option<String> {
@@ -140,7 +144,7 @@ pub fn select_sources(config: &Config) -> Result<SelectedSources> {
     let mut folders: HashSet<&'static str> = HashSet::new();
     for source in known
         .iter()
-        .filter(|source| selection.configured(source.folder))
+        .filter(|source| selection.matches_folder(source.folder))
     {
         folders.insert(source.folder);
     }
@@ -200,6 +204,27 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    const OPENCPN_SOURCES_XML: &str = include_str!("../data/opencpn_enc_sources.xml");
+
+    fn folder_from_catalog_dir(dir: &str) -> Option<&str> {
+        const PREFIX: &str = "{USERDATA}/";
+        let rel = dir.strip_prefix(PREFIX)?.trim_start_matches('/');
+        rel.rsplit('/').next()
+    }
+
+    fn recognized_catalog_count_in_xml(xml: &str) -> usize {
+        use crate::source_taxonomy::recognized_enc_folder;
+
+        xml.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let dir = line.strip_prefix("<dir>")?.strip_suffix("</dir>")?;
+                let folder = folder_from_catalog_dir(dir)?;
+                recognized_enc_folder(folder).then_some(())
+            })
+            .count()
+    }
+
     fn test_config(chart_dir: PathBuf) -> Config {
         Config {
             chart_dir,
@@ -212,6 +237,19 @@ mod tests {
             restart_opencpn: false,
             rebuild_chart_db: false,
         }
+    }
+
+    #[test]
+    fn embedded_source_count_matches_generated_table() {
+        assert_eq!(all_chart_sources().len(), EMBEDDED_SOURCE_COUNT);
+    }
+
+    #[test]
+    fn embedded_source_count_matches_opencpn_xml() {
+        assert_eq!(
+            all_chart_sources().len(),
+            recognized_catalog_count_in_xml(OPENCPN_SOURCES_XML)
+        );
     }
 
     #[test]
@@ -242,6 +280,24 @@ mod tests {
         let selected = select_sources(&config).unwrap();
         let folders: Vec<_> = selected.sources.iter().map(|s| s.folder).collect();
         assert_eq!(folders, vec!["US_CA", "US_WA"]);
+    }
+
+    #[test]
+    fn matches_folder_respects_config_minimums() {
+        let selection = SourceSelection {
+            states: HashSet::from(["CA".to_string()]),
+            regions: HashSet::from(["14".to_string()]),
+            coast_guard_districts: HashSet::from(["1".to_string()]),
+            all_enc: false,
+            inland: false,
+        };
+
+        assert!(selection.matches_folder("US_CA"));
+        assert!(!selection.matches_folder("US_OR"));
+        assert!(selection.matches_folder("US_REGION14"));
+        assert!(selection.matches_folder("US_CGD01"));
+        assert!(!selection.matches_folder("US"));
+        assert!(!selection.matches_folder("US_INLAND"));
     }
 
     #[test]

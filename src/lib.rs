@@ -96,7 +96,7 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
                 .map(|source| {
                     scope.spawn(|| {
                         routine(
-                            options,
+                            options.into(),
                             &format!("Source {} → {}", source.name, source.folder),
                         );
                         let result = sync_source(config, &enc_root, source, options);
@@ -119,7 +119,10 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     }
 
     if options.catalog_only {
-        routine(options, "Catalog-only mode; skipping OpenCPN restart");
+        routine(
+            options.into(),
+            "Catalog-only mode; skipping OpenCPN restart",
+        );
         return finalize(failed);
     }
 
@@ -145,7 +148,7 @@ fn sync_source(
         &source.resolve_catalog_url(config),
         &chart_dir,
         source.catalog_filename,
-        options,
+        options.into(),
     )?;
 
     if options.catalog_only {
@@ -154,7 +157,7 @@ fn sync_source(
 
     let cells = parse_catalog(&catalog_path)?;
     routine(
-        options,
+        options.into(),
         &format!(
             "{} lists {} chart cells",
             source.catalog_filename,
@@ -170,7 +173,7 @@ fn sync_source(
 
     if pending.is_empty() {
         routine(
-            options,
+            options.into(),
             &format!("All cells up to date in {}", chart_dir.display()),
         );
         return Ok(0);
