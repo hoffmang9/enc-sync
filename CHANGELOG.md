@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{chart_dir}/ENC/` (states, regions, Coast Guard districts, national `US`,
   and US Army Corps inland catalogs).
 - Embedded OpenCPN `chart_sources.xml` definitions for NOAA ENC and ACE inland
-  catalogs; folder discovery when no filters are configured.
+  catalogs, generated at build time.
+- Union source selection: config defines folders to sync at minimum; enc-sync
+  also syncs any other recognized `ENC/*` folders already on disk.
 - Config flags `all_enc` and `inland`; optional `catalog_base_url` for tests or
   mirrors.
 - IENC (US Army Corps) catalog parsing support.
@@ -22,8 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking:** `chart_dir` is now OpenCPN's base chart directory (parent of
-  `ENC/`), not a single catalog folder. State/region/CGD filters select which
-  OpenCPN chart folders to sync instead of filtering a national catalog in place.
+  `ENC/`), not a single catalog folder. State/region/CGD config entries define
+  folders to sync at minimum; enc-sync also picks up other recognized `ENC/*`
+  folders on disk.
 - Removed single-folder filtered `ENCProdCat.xml` / `ENCProdCat.upstream.xml`
   behavior and `--catalog-only --local`.
 

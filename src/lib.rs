@@ -27,6 +27,10 @@ mod catalog;
 mod charts;
 mod config;
 mod opencpn;
+mod source_norm;
+#[allow(dead_code)] // consumed by build.rs; tested from the library crate
+#[path = "source_folder.rs"]
+mod source_folder;
 mod sources;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_env;
@@ -57,27 +61,23 @@ pub fn run(config: &Config) -> Result<()> {
 }
 
 pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
-    prepare_chart_dir(&enc_root(config))?;
+    let enc_root = enc_root(config);
+    prepare_chart_dir(&enc_root)?;
     let sources = select_sources(config)?;
 
-    log::info!("Syncing {} chart source(s)", sources.len());
-    if !config.states.is_empty() || !config.regions.is_empty() || !config.coast_guard_districts.is_empty()
-    {
-        log::info!(
-            "Filters active: {} state(s), {} region(s), {} CG district(s)",
-            config.states.len(),
-            config.regions.len(),
-            config.coast_guard_districts.len()
-        );
+    if let Some(summary) = config_minimum_summary(config) {
+        log::info!("Config minimum: {summary}");
     }
-    if config.all_enc {
-        log::info!("Including national ENC/US catalog");
-    }
-    if config.inland {
-        log::info!("Including US Army Corps inland ENC catalogs");
-    }
+    log::info!(
+        "Syncing {} chart source(s): {}",
+        sources.len(),
+        sources
+            .iter()
+            .map(|source| source.folder)
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
-    let enc_root = enc_root(config);
     let mut failed = Vec::new();
     let mut updated = 0usize;
 
@@ -166,5 +166,32 @@ fn finalize(failed: Vec<String>) -> Result<()> {
         Ok(())
     } else {
         bail!("{} chart source(s) failed: {}", failed.len(), failed.join(", "))
+    }
+}
+
+fn config_minimum_summary(config: &Config) -> Option<String> {
+    let mut parts = Vec::new();
+    if !config.states.is_empty() {
+        parts.push(format!("states [{}]", config.states.join(", ")));
+    }
+    if !config.regions.is_empty() {
+        parts.push(format!("regions [{}]", config.regions.join(", ")));
+    }
+    if !config.coast_guard_districts.is_empty() {
+        parts.push(format!(
+            "CG districts [{}]",
+            config.coast_guard_districts.join(", ")
+        ));
+    }
+    if config.all_enc {
+        parts.push("ENC/US".to_string());
+    }
+    if config.inland {
+        parts.push("US Army Corps inland".to_string());
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
     }
 }

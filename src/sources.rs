@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use crate::config::Config;
+use crate::source_norm::normalize_numeric_code;
 
 include!(concat!(env!("OUT_DIR"), "/sources_generated.rs"));
 
@@ -150,53 +151,12 @@ pub fn select_sources(config: &Config) -> Result<Vec<ChartSource>> {
     Ok(selected)
 }
 
-#[cfg(test)]
-pub fn classify_folder(folder: &str) -> Option<SourceKind> {
-    if folder == "US" {
-        return Some(SourceKind::All);
-    }
-    if folder == "US_INLAND" {
-        return Some(SourceKind::InlandMain);
-    }
-    if folder == "US_INLAND_BUOYS" {
-        return Some(SourceKind::InlandBuoys);
-    }
-    if folder == "US_INLAND_OVERLAYS" {
-        return Some(SourceKind::InlandOverlays);
-    }
-    if let Some(code) = folder.strip_prefix("US_CGD") {
-        return Some(SourceKind::CoastGuardDistrict(leak_code(normalize_numeric_code(code))));
-    }
-    if let Some(code) = folder.strip_prefix("US_REGION") {
-        return Some(SourceKind::Region(leak_code(normalize_numeric_code(code))));
-    }
-    if let Some(code) = folder.strip_prefix("US_") {
-        return Some(SourceKind::State(leak_code(code.to_ascii_uppercase())));
-    }
-    None
-}
-
-#[cfg(test)]
-fn leak_code(code: String) -> &'static str {
-    Box::leak(code.into_boxed_str())
-}
-
 fn normalize_codes(values: &[String]) -> HashSet<String> {
     values
         .iter()
         .map(|value| value.trim().to_ascii_uppercase())
         .filter(|value| !value.is_empty())
         .collect()
-}
-
-fn normalize_numeric_code(raw: &str) -> String {
-    let trimmed = raw.trim().to_ascii_uppercase();
-    let stripped = trimmed.trim_start_matches('0');
-    if stripped.is_empty() {
-        "0".to_string()
-    } else {
-        stripped.to_string()
-    }
 }
 
 #[cfg(test)]
@@ -213,13 +173,6 @@ mod tests {
         assert!(sources.iter().any(|s| s.folder == "US_WA"));
         assert!(sources.iter().any(|s| s.folder == "US_INLAND"));
         assert!(sources.iter().any(|s| s.folder == "US"));
-    }
-
-    #[test]
-    fn normalize_numeric_code_trims_leading_zeros() {
-        assert_eq!(normalize_numeric_code("01"), "1");
-        assert_eq!(normalize_numeric_code("00"), "0");
-        assert_eq!(normalize_numeric_code(" 14 "), "14");
     }
 
     #[test]
@@ -307,18 +260,4 @@ mod tests {
         assert_eq!(folders, vec!["US_CA", "US_OR"]);
     }
 
-    #[test]
-    fn classify_folder_recognizes_opencpn_layout() {
-        assert_eq!(classify_folder("US"), Some(SourceKind::All));
-        assert_eq!(
-            classify_folder("US_CGD13"),
-            Some(SourceKind::CoastGuardDistrict("13"))
-        );
-        assert_eq!(
-            classify_folder("US_REGION14"),
-            Some(SourceKind::Region("14"))
-        );
-        assert_eq!(classify_folder("US_CA"), Some(SourceKind::State("CA")));
-        assert_eq!(classify_folder("US_INLAND_BUOYS"), Some(SourceKind::InlandBuoys));
-    }
 }
