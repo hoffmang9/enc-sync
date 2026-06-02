@@ -1,6 +1,17 @@
 //! OpenCPN ENC folder taxonomy shared by runtime selection and build-time validation.
 
+use quick_xml::events::Event;
+use quick_xml::Reader;
+
 pub const OPENCPN_CATALOG_DIR_PREFIX: &str = "{USERDATA}/";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenCPNChartSourceRecord {
+    pub name: String,
+    pub catalog_url: String,
+    pub catalog_filename: String,
+    pub folder: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EncFolderClass {
@@ -12,7 +23,6 @@ pub(crate) enum EncFolderClass {
 }
 
 /// Extract the ENC folder name from an OpenCPN catalog `<dir>` value.
-#[allow(dead_code)] // used by build.rs via `#[path]` include
 pub fn folder_from_opencpn_dir(dir: &str) -> Option<&str> {
     let rel = dir
         .strip_prefix(OPENCPN_CATALOG_DIR_PREFIX)?
@@ -42,20 +52,17 @@ pub(crate) fn classify_enc_folder(folder: &str) -> Option<(EncFolderClass, &str)
     None
 }
 
-/// Used by `build.rs` when parsing embedded OpenCPN source XML.
-#[allow(dead_code)] // only referenced from build.rs via `#[path]` include
 pub fn recognized_enc_folder(folder: &str) -> bool {
     classify_enc_folder(folder).is_some()
 }
 
-#[cfg(test)]
-pub(crate) fn count_recognized_catalogs_in_xml(xml: &str) -> Result<usize, String> {
-    use quick_xml::events::Event;
-    use quick_xml::Reader;
-
+/// Parse recognized chart sources from OpenCPN's embedded `chart_sources.xml` format.
+#[allow(dead_code)] // used by build.rs via `#[path]` include; tests call through the library
+pub fn parse_opencpn_chart_sources(xml: &str) -> Result<Vec<OpenCPNChartSourceRecord>, String> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
+    let mut sources = Vec::new();
     let mut buf = Vec::new();
     let mut in_catalog = false;
     let mut current_field = None::<String>;
@@ -63,7 +70,6 @@ pub(crate) fn count_recognized_catalogs_in_xml(xml: &str) -> Result<usize, Strin
     let mut current_name = None::<String>;
     let mut current_location = None::<String>;
     let mut current_dir = None::<String>;
-    let mut count = 0usize;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -85,15 +91,13 @@ pub(crate) fn count_recognized_catalogs_in_xml(xml: &str) -> Result<usize, Strin
             Ok(Event::End(tag)) => {
                 let field = String::from_utf8_lossy(tag.name().as_ref()).into_owned();
                 if field == "catalog" {
-                    if let (Some(_name), Some(_location), Some(dir)) = (
+                    if let (Some(name), Some(location), Some(dir)) = (
                         current_name.take(),
                         current_location.take(),
                         current_dir.take(),
                     ) {
-                        if let Some(folder) = folder_from_opencpn_dir(&dir) {
-                            if recognized_enc_folder(folder) {
-                                count += 1;
-                            }
+                        if let Some(record) = chart_source_record(name, location, dir) {
+                            sources.push(record);
                         }
                     }
                     in_catalog = false;
@@ -118,12 +122,39 @@ pub(crate) fn count_recognized_catalogs_in_xml(xml: &str) -> Result<usize, Strin
         buf.clear();
     }
 
-    Ok(count)
+    sources.sort_by(|a, b| a.folder.cmp(&b.folder));
+    Ok(sources)
+}
+
+fn chart_source_record(
+    name: String,
+    catalog_url: String,
+    dir: String,
+) -> Option<OpenCPNChartSourceRecord> {
+    let folder = folder_from_opencpn_dir(&dir)?.to_string();
+    if !recognized_enc_folder(&folder) {
+        return None;
+    }
+    Some(OpenCPNChartSourceRecord {
+        catalog_filename: catalog_filename(&catalog_url).to_string(),
+        name,
+        catalog_url,
+        folder,
+    })
+}
+
+fn catalog_filename(url: &str) -> &str {
+    url.rsplit('/')
+        .next()
+        .filter(|part| !part.is_empty())
+        .unwrap_or("catalog.xml")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{folder_from_opencpn_dir, recognized_enc_folder};
+    use super::{folder_from_opencpn_dir, parse_opencpn_chart_sources, recognized_enc_folder};
+
+    const OPENCPN_SOURCES_XML: &str = include_str!("../data/opencpn_enc_sources.xml");
 
     #[test]
     fn folder_from_opencpn_dir_extracts_enc_folder_name() {
@@ -141,5 +172,32 @@ mod tests {
         assert!(recognized_enc_folder("US_CA"));
         assert!(recognized_enc_folder("US_INLAND_BUOYS"));
         assert!(!recognized_enc_folder("ignored"));
+    }
+
+    #[test]
+    fn parse_opencpn_chart_sources_reads_embedded_catalogs() {
+        let sources = parse_opencpn_chart_sources(OPENCPN_SOURCES_XML).unwrap();
+        assert!(!sources.is_empty());
+        assert!(sources.iter().any(|source| source.folder == "US_CA"));
+        assert!(sources.iter().any(|source| source.folder == "US"));
+        assert_eq!(
+            sources
+                .iter()
+                .find(|source| source.folder == "US_CA")
+                .map(|source| source.catalog_filename.as_str()),
+            Some("CA_ENCProdCat.xml")
+        );
+    }
+
+    #[test]
+    fn parse_opencpn_chart_sources_returns_sorted_folders() {
+        let sources = parse_opencpn_chart_sources(OPENCPN_SOURCES_XML).unwrap();
+        let folders: Vec<_> = sources
+            .iter()
+            .map(|source| source.folder.as_str())
+            .collect();
+        let mut sorted = folders.clone();
+        sorted.sort_unstable();
+        assert_eq!(folders, sorted);
     }
 }

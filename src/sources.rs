@@ -227,9 +227,9 @@ mod tests {
 
     #[test]
     fn embedded_source_count_matches_opencpn_xml() {
-        let count =
-            crate::source_taxonomy::count_recognized_catalogs_in_xml(OPENCPN_SOURCES_XML).unwrap();
-        assert_eq!(all_chart_sources().len(), count);
+        let parsed =
+            crate::source_taxonomy::parse_opencpn_chart_sources(OPENCPN_SOURCES_XML).unwrap();
+        assert_eq!(all_chart_sources().len(), parsed.len());
     }
 
     #[test]
