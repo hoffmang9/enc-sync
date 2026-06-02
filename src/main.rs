@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use enc_sync::{home_dir, load_config, run};
+use enc_sync::{load_config, logging, run_with_options, RunOptions};
 
 const HOME_CONFIG_REL: &str = ".enc-sync/config.toml";
 
@@ -27,10 +27,13 @@ mod test_env;
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let config_path = parse_config_path()?;
-    log::info!("Using config {}", config_path.display());
+    let (config_path, options) = parse_args()?;
+    logging::routine(
+        options.into(),
+        &format!("Using config {}", config_path.display()),
+    );
     let config = load_config(&config_path)?;
-    run(&config)
+    run_with_options(&config, options)
 }
 
 fn discover_config_path() -> Option<PathBuf> {
@@ -38,32 +41,51 @@ fn discover_config_path() -> Option<PathBuf> {
     if local.is_file() {
         return Some(local);
     }
-    home_dir()
+    enc_sync::home_dir()
         .map(|home| home.join(HOME_CONFIG_REL))
         .filter(|path| path.is_file())
 }
 
-fn parse_config_path() -> Result<PathBuf> {
+fn parse_args() -> Result<(PathBuf, RunOptions)> {
     let args: Vec<String> = std::env::args().collect();
-    for (index, arg) in args.iter().enumerate() {
-        if arg == "--config" {
-            return args
-                .get(index + 1)
-                .map(PathBuf::from)
-                .context("--config requires a path argument");
-        }
-        if arg == "-h" || arg == "--help" {
-            print_help();
-            std::process::exit(0);
+    let mut config_path = None;
+    let mut options = RunOptions::default();
+
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--config" => {
+                config_path = Some(
+                    args.get(index + 1)
+                        .map(PathBuf::from)
+                        .context("--config requires a path argument")?,
+                );
+                index += 2;
+            }
+            "--catalog-only" => {
+                options.catalog_only = true;
+                index += 1;
+            }
+            "--cron" => {
+                options.cron = true;
+                index += 1;
+            }
+            "-h" | "--help" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => bail!("unknown argument: {other}\n\n{}", help_text()),
         }
     }
-    if let Some(path) = discover_config_path() {
-        return Ok(path);
-    }
-    bail!(
-        "No config file found. Pass --config /path/to/enc-sync.toml\n\n{}",
-        help_text()
-    )
+
+    let config_path = config_path.or_else(discover_config_path).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No config file found. Pass --config /path/to/enc-sync.toml\n\n{}",
+            help_text()
+        )
+    })?;
+
+    Ok((config_path, options))
 }
 
 fn print_help() {
@@ -74,13 +96,17 @@ fn help_text() -> &'static str {
     r#"enc-sync -- Sync NOAA ENC charts for OpenCPN
 
 Usage:
-  enc-sync --config /path/to/enc-sync.toml
+  enc-sync [--config /path/to/enc-sync.toml] [--catalog-only] [--cron]
 
-If --config is omitted, looks for config in this order:
-  1. enc-sync.toml in the current directory
-  2. ~/.enc-sync/config.toml
+Options:
+  --config PATH    Config file (default: ./enc-sync.toml, then ~/.enc-sync/config.toml)
+  --catalog-only   Download latest catalogs only; do not download chart cells or restart OpenCPN
+  --cron           Quieter routine progress logs for cron (errors and downloads stay at info)
 
-See enc-sync.example.toml for configuration options.
+Chart folders mirror OpenCPN Chart Downloader defaults under chart_dir/ENC/
+(US_CA, US_OR, US_REGION14, US_CGD13, US, US_INLAND, …).
+
+See enc-sync.example.toml and README.md for configuration options.
 "#
 }
 

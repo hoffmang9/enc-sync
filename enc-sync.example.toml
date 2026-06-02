@@ -13,14 +13,19 @@
 #   0 23 * * 1-5 enc-sync --config ~/.enc-sync/config.toml \
 #     >>/tmp/enc-sync.log 2>&1
 
-chart_dir = "~/Charts/ENC/US"
-catalog_url = "https://www.charts.noaa.gov/ENCs/ENCProdCat.xml"
+# OpenCPN BaseChartDir (the parent of ENC/). Charts sync into subfolders that
+# mirror Chart Downloader defaults, e.g. ENC/US_CA, ENC/US_OR, ENC/US_REGION14.
+chart_dir = "~/Documents/Charts"
 
-# Keep these areas current. A cell is updated if it matches ANY non-empty list below.
-# Leave a list empty to ignore that dimension. Leave all three empty to update every cell.
+# Sync at least these OpenCPN chart folders (created if missing). enc-sync also
+# syncs any other recognized ENC/* folders already on disk (union, not either/or).
 states = ["CA", "OR", "WA"]
-regions = []
-coast_guard_districts = []
+regions = []                 # e.g. "14", "15" → ENC/US_REGION14
+coast_guard_districts = []     # e.g. "13" → ENC/US_CGD13
+
+# Optional extras (off by default):
+# all_enc = true               # at least sync ENC/US (national catalog)
+# inland = true                # at least sync US Army Corps inland folders
 
 # After a successful download, quit and relaunch OpenCPN.
 restart_opencpn = true
