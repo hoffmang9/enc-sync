@@ -48,6 +48,27 @@ pub fn catalog_xml(base_url: &str) -> String {
     )
 }
 
+pub fn two_cell_catalog_xml(base_url: &str, second_name: &str, second_timestamp: &str) -> String {
+    format!(
+        r#"<?xml version="1.0"?>
+<catalog>
+  <cell>
+    <name>US5CA01M</name>
+    <zipfile_location>{base_url}/US5CA01M.zip</zipfile_location>
+    <zipfile_datetime_iso8601>2024-06-01T00:00:00Z</zipfile_datetime_iso8601>
+    <state>CA</state>
+  </cell>
+  <cell>
+    <name>{second_name}</name>
+    <zipfile_location>{base_url}/{second_name}.zip</zipfile_location>
+    <zipfile_datetime_iso8601>{second_timestamp}</zipfile_datetime_iso8601>
+    <state>CA</state>
+  </cell>
+</catalog>
+"#
+    )
+}
+
 pub struct MockHttpServer {
     pub zip_downloads: Arc<AtomicUsize>,
     pub base_url: String,
@@ -75,6 +96,41 @@ impl MockHttpServer {
                 } else if path.ends_with("US5FL01M.zip") {
                     counts.fetch_add(1, Ordering::SeqCst);
                     tiny_http::Response::from_data(fl_zip.clone()).with_status_code(200)
+                } else {
+                    tiny_http::Response::from_string("not found").with_status_code(404)
+                };
+                let _ = request.respond(response);
+            }
+        });
+
+        Self {
+            zip_downloads,
+            base_url,
+            _handle: handle,
+        }
+    }
+
+    /// Serves a two-cell CA catalog; the first cell zip succeeds, the second returns 404.
+    pub fn start_with_second_cell_failing(ca_zip: Vec<u8>) -> Self {
+        let zip_downloads = Arc::new(AtomicUsize::new(0));
+        let counts = zip_downloads.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{port}");
+        let catalog = two_cell_catalog_xml(&base_url, "US5CA02M", "2024-06-02T00:00:00Z");
+        let server = tiny_http::Server::from_listener(listener, None).unwrap();
+
+        let handle = thread::spawn(move || {
+            for request in server.incoming_requests() {
+                let path = request.url().split('?').next().unwrap_or("");
+                let response = if path.ends_with("CA_ENCProdCat.xml") {
+                    tiny_http::Response::from_string(catalog.clone()).with_status_code(200)
+                } else if path.ends_with("US5CA01M.zip") {
+                    counts.fetch_add(1, Ordering::SeqCst);
+                    tiny_http::Response::from_data(ca_zip.clone()).with_status_code(200)
+                } else if path.ends_with("US5CA02M.zip") {
+                    counts.fetch_add(1, Ordering::SeqCst);
+                    tiny_http::Response::from_string("not found").with_status_code(404)
                 } else {
                     tiny_http::Response::from_string("not found").with_status_code(404)
                 };

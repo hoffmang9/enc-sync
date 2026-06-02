@@ -5,8 +5,18 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use crate::config::Config;
-use crate::source_norm::normalize_numeric_code;
 use crate::source_taxonomy::{classify_enc_folder, EncFolderClass};
+
+/// Normalize region/CGD numeric codes for config and folder matching.
+fn normalize_numeric_code(raw: &str) -> String {
+    let trimmed = raw.trim().to_ascii_uppercase();
+    let stripped = trimmed.trim_start_matches('0');
+    if stripped.is_empty() {
+        "0".to_string()
+    } else {
+        stripped.to_string()
+    }
+}
 
 include!(concat!(env!("OUT_DIR"), "/sources_generated.rs"));
 
@@ -218,6 +228,13 @@ mod tests {
             restart_opencpn: false,
             rebuild_chart_db: false,
         }
+    }
+
+    #[test]
+    fn normalize_numeric_code_trims_leading_zeros() {
+        assert_eq!(normalize_numeric_code("01"), "1");
+        assert_eq!(normalize_numeric_code("00"), "0");
+        assert_eq!(normalize_numeric_code(" 14 "), "14");
     }
 
     #[test]

@@ -163,3 +163,46 @@ fn catalog_only_overwrites_stale_local_catalog() {
     );
     assert!(!catalog.contains("stale"));
 }
+
+#[test]
+fn sync_continues_after_cell_failure_and_saves_partial_update_data() {
+    let chart_home = TempDir::new().unwrap();
+    let chart_base = chart_home.path().to_path_buf();
+    let server = MockHttpServer::start_with_second_cell_failing(build_cell_zip(
+        "US5CA01M",
+        b"partial-success-bytes",
+    ));
+    let config_path = chart_home.path().join("enc-sync.toml");
+    write_config(
+        &config_path,
+        &chart_base.display().to_string(),
+        &server.base_url,
+    );
+    let config = load_config(&config_path).unwrap();
+
+    let error = run(&config).unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.contains("chart source(s) failed: US_CA"),
+        "unexpected error: {message}"
+    );
+
+    let chart_file = chart_base.join("ENC/US_CA/US5CA01M/US5CA01M.000");
+    assert!(chart_file.is_file(), "expected first cell to download");
+    assert_eq!(
+        std::fs::read(&chart_file).unwrap(),
+        b"partial-success-bytes"
+    );
+    assert!(!chart_base.join("ENC/US_CA/US5CA02M").exists());
+
+    let dat = std::fs::read_to_string(chart_base.join("ENC/US_CA/chartdldr_pi.dat")).unwrap();
+    assert!(dat.contains("us5ca01m 1717200000"));
+    assert!(!dat.contains("us5ca02m"));
+
+    assert_eq!(
+        server
+            .zip_downloads
+            .load(std::sync::atomic::Ordering::SeqCst),
+        2
+    );
+}

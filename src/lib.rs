@@ -28,7 +28,6 @@ mod charts;
 mod config;
 pub mod logging;
 mod opencpn;
-mod source_norm;
 mod source_taxonomy;
 mod sources;
 #[cfg(any(test, feature = "test-helpers"))]
@@ -99,20 +98,19 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
                     let folder = source.folder;
                     let enc_root = enc_root.clone();
                     let handle = scope.spawn(move || {
-                        let result = catch_unwind(AssertUnwindSafe(|| {
+                        catch_unwind(AssertUnwindSafe(|| {
                             routine(log, &format!("Source {} → {}", source.name, folder));
                             sync_source(config, &enc_root, source, options, log)
                         }))
-                        .unwrap_or_else(|_| Err(anyhow!("sync worker panicked for {folder}")));
-                        (folder, result)
+                        .unwrap_or_else(|_| Err(anyhow!("sync worker panicked for {folder}")))
                     });
                     (folder, handle)
                 })
                 .collect();
 
             for (folder, handle) in handles {
-                let (_, result) = match handle.join() {
-                    Ok(pair) => pair,
+                let result = match handle.join() {
+                    Ok(result) => result,
                     Err(_) => {
                         log::error!("Sync worker thread panicked for {folder}");
                         failed.push(folder.to_string());
