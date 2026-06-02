@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use crate::config::Config;
-use crate::source_kind::SourceKind;
 use crate::source_norm::normalize_numeric_code;
+use crate::source_taxonomy::{source_kind_from_folder, SourceKind};
 
 include!(concat!(env!("OUT_DIR"), "/sources_generated.rs"));
 
@@ -17,7 +17,6 @@ pub struct ChartSource {
     pub catalog_filename: &'static str,
     /// Folder name under `ENC/`, e.g. `US_CA`.
     pub folder: &'static str,
-    pub kind: SourceKind,
 }
 
 impl ChartSource {
@@ -32,14 +31,16 @@ impl ChartSource {
             .map(|value| value.trim())
             .filter(|value| !value.is_empty())
         {
-            return format!(
-                "{}/{}",
-                base.trim_end_matches('/'),
-                self.catalog_filename
-            );
+            return format!("{}/{}", base.trim_end_matches('/'), self.catalog_filename);
         }
         self.catalog_url.to_string()
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectedSources {
+    pub sources: Vec<ChartSource>,
+    pub minimum_summary: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,12 +73,15 @@ impl SourceSelection {
         }
     }
 
-    fn configured(&self, source: &ChartSource) -> bool {
-        match source.kind {
+    fn configured(&self, folder: &str) -> bool {
+        let Some(kind) = source_kind_from_folder(folder) else {
+            return false;
+        };
+        match kind {
             SourceKind::All => self.all_enc,
-            SourceKind::State(code) => self.states.contains(code),
-            SourceKind::Region(code) => self.regions.contains(code),
-            SourceKind::CoastGuardDistrict(code) => self.coast_guard_districts.contains(code),
+            SourceKind::State(code) => self.states.contains(&code),
+            SourceKind::Region(code) => self.regions.contains(&code),
+            SourceKind::CoastGuardDistrict(code) => self.coast_guard_districts.contains(&code),
             SourceKind::InlandMain | SourceKind::InlandBuoys | SourceKind::InlandOverlays => {
                 self.inland
             }
@@ -114,29 +118,31 @@ impl SourceSelection {
 
 pub fn enc_root(config: &Config) -> PathBuf {
     let base = &config.chart_dir;
-    if base.file_name().is_some_and(|name| name.eq_ignore_ascii_case("ENC")) {
+    if base
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("ENC"))
+    {
         return base.clone();
     }
     base.join("ENC")
 }
 
 pub fn all_chart_sources() -> &'static [ChartSource] {
-    let _ = EMBEDDED_SOURCE_COUNT;
     EMBEDDED_SOURCES
 }
 
-pub fn config_minimum_summary(config: &Config) -> Option<String> {
-    SourceSelection::from_config(config).summary()
-}
-
-pub fn select_sources(config: &Config) -> Result<Vec<ChartSource>> {
+pub fn select_sources(config: &Config) -> Result<SelectedSources> {
     let selection = SourceSelection::from_config(config);
+    let minimum_summary = selection.summary();
     let enc_root = enc_root(config);
     let known = all_chart_sources();
     let known_by_folder: HashMap<_, _> = known.iter().map(|s| (s.folder, s)).collect();
 
     let mut folders: HashSet<&'static str> = HashSet::new();
-    for source in known.iter().filter(|source| selection.configured(source)) {
+    for source in known
+        .iter()
+        .filter(|source| selection.configured(source.folder))
+    {
         folders.insert(source.folder);
     }
 
@@ -165,12 +171,15 @@ pub fn select_sources(config: &Config) -> Result<Vec<ChartSource>> {
         );
     }
 
-    let mut selected: Vec<ChartSource> = folders
+    let mut sources: Vec<ChartSource> = folders
         .into_iter()
         .map(|folder| (*known_by_folder[folder]).clone())
         .collect();
-    selected.sort_by(|a, b| a.folder.cmp(b.folder));
-    Ok(selected)
+    sources.sort_by(|a, b| a.folder.cmp(b.folder));
+    Ok(SelectedSources {
+        sources,
+        minimum_summary,
+    })
 }
 
 fn normalize_codes(values: &[String]) -> HashSet<String> {
@@ -192,10 +201,24 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn test_config(chart_dir: PathBuf) -> Config {
+        Config {
+            chart_dir,
+            states: vec![],
+            regions: vec![],
+            coast_guard_districts: vec![],
+            all_enc: false,
+            inland: false,
+            catalog_base_url: None,
+            restart_opencpn: false,
+            rebuild_chart_db: false,
+        }
+    }
+
     #[test]
     fn embedded_sources_include_wa_or_ca_and_inland() {
         let sources = all_chart_sources();
-        assert_eq!(sources.len(), EMBEDDED_SOURCE_COUNT);
+        assert!(!sources.is_empty());
         assert!(sources.iter().any(|s| s.folder == "US_CA"));
         assert!(sources.iter().any(|s| s.folder == "US_OR"));
         assert!(sources.iter().any(|s| s.folder == "US_WA"));
@@ -205,55 +228,31 @@ mod tests {
 
     #[test]
     fn config_minimum_summary_uses_normalized_codes() {
-        let config = Config {
-            chart_dir: PathBuf::from("/charts"),
-            states: vec![],
-            regions: vec!["01".into()],
-            coast_guard_districts: vec!["11".into()],
-            all_enc: false,
-            inland: false,
-            catalog_base_url: None,
-            restart_opencpn: false,
-            rebuild_chart_db: false,
-        };
-        let summary = config_minimum_summary(&config).unwrap();
+        let mut config = test_config(PathBuf::from("/charts"));
+        config.regions = vec!["01".into()];
+        config.coast_guard_districts = vec!["11".into()];
+        let summary = select_sources(&config).unwrap().minimum_summary.unwrap();
         assert!(summary.contains("regions [1]"));
         assert!(summary.contains("CG districts [11]"));
     }
 
     #[test]
     fn config_selects_minimum_state_folders() {
-        let config = Config {
-            chart_dir: PathBuf::from("/charts"),
-            states: vec!["CA".into(), "WA".into()],
-            regions: vec![],
-            coast_guard_districts: vec![],
-            all_enc: false,
-            inland: false,
-            catalog_base_url: None,
-            restart_opencpn: false,
-            rebuild_chart_db: false,
-        };
+        let mut config = test_config(PathBuf::from("/charts"));
+        config.states = vec!["CA".into(), "WA".into()];
         let selected = select_sources(&config).unwrap();
-        let folders: Vec<_> = selected.iter().map(|s| s.folder).collect();
+        let folders: Vec<_> = selected.sources.iter().map(|s| s.folder).collect();
         assert_eq!(folders, vec!["US_CA", "US_WA"]);
     }
 
     #[test]
     fn selection_matches_state_region_and_cgd() {
-        let config = Config {
-            chart_dir: PathBuf::from("/charts"),
-            states: vec!["CA".into()],
-            regions: vec!["14".into()],
-            coast_guard_districts: vec!["11".into()],
-            all_enc: false,
-            inland: false,
-            catalog_base_url: None,
-            restart_opencpn: false,
-            rebuild_chart_db: false,
-        };
+        let mut config = test_config(PathBuf::from("/charts"));
+        config.states = vec!["CA".into()];
+        config.regions = vec!["14".into()];
+        config.coast_guard_districts = vec!["11".into()];
         let selected = select_sources(&config).unwrap();
-        let folders: Vec<_> = selected.iter().map(|s| s.folder).collect();
+        let folders: Vec<_> = selected.sources.iter().map(|s| s.folder).collect();
         assert!(folders.contains(&"US_CA"));
         assert!(folders.contains(&"US_REGION14"));
         assert!(folders.contains(&"US_CGD11"));
@@ -266,19 +265,10 @@ mod tests {
         fs::create_dir_all(enc.join("US_CA")).unwrap();
         fs::create_dir_all(enc.join("US_OR")).unwrap();
 
-        let config = Config {
-            chart_dir: base.path().to_path_buf(),
-            states: vec!["CA".into()],
-            regions: vec![],
-            coast_guard_districts: vec![],
-            all_enc: false,
-            inland: false,
-            catalog_base_url: None,
-            restart_opencpn: false,
-            rebuild_chart_db: false,
-        };
+        let mut config = test_config(base.path().to_path_buf());
+        config.states = vec!["CA".into()];
         let selected = select_sources(&config).unwrap();
-        let folders: Vec<_> = selected.iter().map(|s| s.folder).collect();
+        let folders: Vec<_> = selected.sources.iter().map(|s| s.folder).collect();
         assert_eq!(folders, vec!["US_CA", "US_OR"]);
     }
 
@@ -290,19 +280,9 @@ mod tests {
         fs::create_dir_all(enc.join("US_OR")).unwrap();
         fs::create_dir_all(enc.join("ignored")).unwrap();
 
-        let config = Config {
-            chart_dir: base.path().to_path_buf(),
-            states: vec![],
-            regions: vec![],
-            coast_guard_districts: vec![],
-            all_enc: false,
-            inland: false,
-            catalog_base_url: None,
-            restart_opencpn: false,
-            rebuild_chart_db: false,
-        };
+        let config = test_config(base.path().to_path_buf());
         let selected = select_sources(&config).unwrap();
-        let folders: Vec<_> = selected.iter().map(|s| s.folder).collect();
+        let folders: Vec<_> = selected.sources.iter().map(|s| s.folder).collect();
         assert_eq!(folders, vec!["US_CA", "US_OR"]);
     }
 }

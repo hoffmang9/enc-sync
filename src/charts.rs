@@ -7,6 +7,7 @@ use anyhow::{bail, Context, Result};
 use zip::read::ZipArchive;
 
 use crate::catalog::Cell;
+use crate::logging::routine;
 
 pub(crate) const UPDATE_DATA_FILENAME: &str = "chartdldr_pi.dat";
 const USER_AGENT: &str = "enc-sync/0.1";
@@ -43,7 +44,10 @@ pub(crate) fn save_update_data(chart_dir: &Path, data: &BTreeMap<String, i64>) -
     })
 }
 
-pub(crate) fn write_atomically(path: &Path, write: impl FnOnce(&mut File) -> Result<()>) -> Result<()> {
+pub(crate) fn write_atomically(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> Result<()>,
+) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("creating temporary file near {}", path.display()))?;
@@ -139,21 +143,16 @@ pub(crate) fn download_catalog(
 ) -> Result<PathBuf> {
     let catalog_path = chart_dir.join(catalog_filename);
 
-    if cron {
-        log::debug!("Downloading catalog {catalog_url}");
-    } else {
-        log::info!("Downloading catalog {catalog_url}");
-    }
+    routine(cron, &format!("Downloading catalog {catalog_url}"));
     let catalog_url = catalog_url.to_string();
     write_atomically(&catalog_path, |file| {
         file.write_all(&fetch_url(&catalog_url)?)?;
         Ok(())
     })?;
-    if cron {
-        log::debug!("Catalog saved to {}", catalog_path.display());
-    } else {
-        log::info!("Catalog saved to {}", catalog_path.display());
-    }
+    routine(
+        cron,
+        &format!("Catalog saved to {}", catalog_path.display()),
+    );
     Ok(catalog_path)
 }
 

@@ -47,9 +47,7 @@ fn sync_downloads_state_folder_and_skips_when_up_to_date() {
 
     let dat = std::fs::read_to_string(chart_base.join("ENC/US_CA/chartdldr_pi.dat")).unwrap();
     assert!(dat.contains(&format!("us5ca01m {CA_TIMESTAMP}")));
-    assert!(chart_base
-        .join("ENC/US_CA/CA_ENCProdCat.xml")
-        .is_file());
+    assert!(chart_base.join("ENC/US_CA/CA_ENCProdCat.xml").is_file());
 
     assert_eq!(
         server
@@ -82,11 +80,7 @@ fn sync_uses_tilde_chart_dir_from_home_config() {
         build_cell_zip("US5FL01M", b"unused"),
     );
     let config_path = config_dir.join("config.toml");
-    write_config(
-        &config_path,
-        "~/Documents/Charts",
-        &server.base_url,
-    );
+    write_config(&config_path, "~/Documents/Charts", &server.base_url);
 
     let config = load_config(&config_path).expect("tilde chart_dir should expand");
     assert_eq!(config.chart_dir, chart_base);
@@ -163,6 +157,9 @@ fn catalog_only_overwrites_stale_local_catalog() {
     .expect("catalog-only sync");
 
     let catalog = std::fs::read_to_string(&catalog_path).unwrap();
-    assert!(catalog.contains("US5CA01M"), "expected fresh catalog from server");
+    assert!(
+        catalog.contains("US5CA01M"),
+        "expected fresh catalog from server"
+    );
     assert!(!catalog.contains("stale"));
 }

@@ -26,29 +26,30 @@
 mod catalog;
 mod charts;
 mod config;
+pub mod logging;
 mod opencpn;
-mod source_kind;
 mod source_norm;
-#[allow(dead_code)] // `source_kind_rust_expr_for_folder` is used by build.rs
-#[path = "source_taxonomy.rs"]
 mod source_taxonomy;
 mod sources;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_env;
 
+use std::thread;
+
 use anyhow::{bail, Result};
 
 pub use catalog::{parse_catalog, Cell};
 pub use config::{home_dir, load_config, Config};
-pub use source_kind::SourceKind;
+pub use source_taxonomy::SourceKind;
 pub use sources::ChartSource;
 
 use charts::{
     cell_key, download_catalog, download_cell, load_update_data, needs_update, save_update_data,
 };
 use config::prepare_chart_dir;
+use logging::{important, routine};
 use opencpn::restart_opencpn;
-use sources::{config_minimum_summary, enc_root, select_sources};
+use sources::{enc_root, select_sources};
 
 /// Controls whether enc-sync downloads chart cells or only refreshes catalogs.
 #[derive(Debug, Clone, Copy, Default)]
@@ -60,19 +61,8 @@ pub struct RunOptions {
     pub cron: bool,
 }
 
-/// Log at info by default; in cron mode, `detail` messages drop to debug.
-macro_rules! run_log {
-    ($options:expr, info, $($arg:tt)*) => {
-        log::info!($($arg)*)
-    };
-    ($options:expr, detail, $($arg:tt)*) => {
-        if $options.cron {
-            log::debug!($($arg)*);
-        } else {
-            log::info!($($arg)*);
-        }
-    };
-}
+/// Maximum chart sources synced concurrently (catalog fetch + cell downloads).
+const MAX_CONCURRENT_SOURCES: usize = 4;
 
 pub fn run(config: &Config) -> Result<()> {
     run_with_options(config, RunOptions::default())
@@ -81,52 +71,63 @@ pub fn run(config: &Config) -> Result<()> {
 pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     let enc_root = enc_root(config);
     prepare_chart_dir(&enc_root)?;
-    let sources = select_sources(config)?;
+    let selected = select_sources(config)?;
 
-    if let Some(summary) = config_minimum_summary(config) {
-        run_log!(options, info, "Config minimum: {summary}");
+    if let Some(summary) = selected.minimum_summary {
+        important(&format!("Config minimum: {summary}"));
     }
-    run_log!(
-        options,
-        info,
+    important(&format!(
         "Syncing {} chart source(s): {}",
-        sources.len(),
-        sources
+        selected.sources.len(),
+        selected
+            .sources
             .iter()
             .map(|source| source.folder)
             .collect::<Vec<_>>()
             .join(", ")
-    );
+    ));
 
     let mut failed = Vec::new();
     let mut updated = 0usize;
 
-    for source in &sources {
-        run_log!(
-            options,
-            detail,
-            "Source {} → {}",
-            source.name,
-            source.folder
-        );
-        match sync_source(config, &enc_root, source, options) {
-            Ok(count) => updated += count,
-            Err(error) => {
-                log::error!("Failed syncing {}: {:#}", source.folder, error);
-                failed.push(source.folder.to_string());
+    for chunk in selected.sources.chunks(MAX_CONCURRENT_SOURCES) {
+        thread::scope(|scope| {
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|source| {
+                    scope.spawn(|| {
+                        routine(
+                            options.cron,
+                            &format!("Source {} → {}", source.name, source.folder),
+                        );
+                        let result = sync_source(config, &enc_root, source, options);
+                        (source.folder, result)
+                    })
+                })
+                .collect();
+
+            for handle in handles {
+                let (folder, result) = handle.join().unwrap();
+                match result {
+                    Ok(count) => updated += count,
+                    Err(error) => {
+                        log::error!("Failed syncing {folder}: {error:#}");
+                        failed.push(folder.to_string());
+                    }
+                }
             }
-        }
+        });
     }
 
     if options.catalog_only {
-        run_log!(options, detail, "Catalog-only mode; skipping OpenCPN restart");
+        routine(options.cron, "Catalog-only mode; skipping OpenCPN restart");
         return finalize(failed);
     }
 
     if updated > 0 && config.restart_opencpn {
         restart_opencpn(config.rebuild_chart_db)?;
     } else if updated == 0 {
-        run_log!(options, info, "No chart files changed; leaving OpenCPN running");
+        important("No chart files changed; leaving OpenCPN running");
     }
 
     finalize(failed)
@@ -153,12 +154,13 @@ fn sync_source(
     }
 
     let cells = parse_catalog(&catalog_path)?;
-    run_log!(
-        options,
-        detail,
-        "{} lists {} chart cells",
-        source.catalog_filename,
-        cells.len()
+    routine(
+        options.cron,
+        &format!(
+            "{} lists {} chart cells",
+            source.catalog_filename,
+            cells.len()
+        ),
     );
 
     let mut update_data = load_update_data(&chart_dir)?;
@@ -168,25 +170,26 @@ fn sync_source(
         .collect();
 
     if pending.is_empty() {
-        run_log!(
-            options,
-            detail,
-            "All cells up to date in {}",
-            chart_dir.display()
+        routine(
+            options.cron,
+            &format!("All cells up to date in {}", chart_dir.display()),
         );
         return Ok(0);
     }
 
     let total = pending.len();
-    log::info!("Downloading {total} updated or new cells into {}", source.folder);
+    important(&format!(
+        "Downloading {total} updated or new cells into {}",
+        source.folder
+    ));
     let mut updated = 0usize;
     for (index, cell) in pending.into_iter().enumerate() {
-        log::info!(
+        important(&format!(
             "[{}] Downloading {} ({} of {total})",
             source.folder,
             cell.name,
             index + 1
-        );
+        ));
         download_cell(&chart_dir, &cell)?;
         update_data.insert(cell_key(&cell.name), cell.timestamp);
         updated += 1;
@@ -199,6 +202,10 @@ fn finalize(failed: Vec<String>) -> Result<()> {
     if failed.is_empty() {
         Ok(())
     } else {
-        bail!("{} chart source(s) failed: {}", failed.len(), failed.join(", "))
+        bail!(
+            "{} chart source(s) failed: {}",
+            failed.len(),
+            failed.join(", ")
+        )
     }
 }

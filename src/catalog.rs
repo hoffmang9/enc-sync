@@ -184,7 +184,11 @@ impl CellBuilder {
             return Ok(None);
         };
 
-        Ok(Some(Cell { name, url, timestamp }))
+        Ok(Some(Cell {
+            name,
+            url,
+            timestamp,
+        }))
     }
 }
 

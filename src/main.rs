@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use enc_sync::{load_config, run_with_options, RunOptions};
+use enc_sync::{load_config, logging, run_with_options, RunOptions};
 
 const HOME_CONFIG_REL: &str = ".enc-sync/config.toml";
 
@@ -28,11 +28,10 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let (config_path, options) = parse_args()?;
-    if options.cron {
-        log::debug!("Using config {}", config_path.display());
-    } else {
-        log::info!("Using config {}", config_path.display());
-    }
+    logging::routine(
+        options.cron,
+        &format!("Using config {}", config_path.display()),
+    );
     let config = load_config(&config_path)?;
     run_with_options(&config, options)
 }
@@ -79,14 +78,12 @@ fn parse_args() -> Result<(PathBuf, RunOptions)> {
         }
     }
 
-    let config_path = config_path
-        .or_else(discover_config_path)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "No config file found. Pass --config /path/to/enc-sync.toml\n\n{}",
-                help_text()
-            )
-        })?;
+    let config_path = config_path.or_else(discover_config_path).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No config file found. Pass --config /path/to/enc-sync.toml\n\n{}",
+            help_text()
+        )
+    })?;
 
     Ok((config_path, options))
 }
