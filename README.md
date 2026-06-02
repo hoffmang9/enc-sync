@@ -108,22 +108,28 @@ cp enc-sync.example.toml ~/.enc-sync/config.toml
 ```toml
 chart_dir = "~/Documents/Charts"
 
-# Select OpenCPN chart folders to sync (matches ANY non-empty list):
+# Sync at least these OpenCPN chart folders (created if missing). enc-sync also
+# syncs any other recognized ENC/* folders already on disk.
 states = ["CA", "OR", "WA"]      # ENC/US_CA, ENC/US_OR, ENC/US_WA
 regions = []                     # e.g. "14" → ENC/US_REGION14
 coast_guard_districts = []       # e.g. "13" → ENC/US_CGD13
 
-# Optional extras:
-# all_enc = true                 # also sync ENC/US (national catalog)
-# inland = true                  # US Army Corps inland catalogs
+# Optional minimums:
+# all_enc = true                 # at least sync ENC/US (national catalog)
+# inland = true                  # at least sync US Army Corps inland folders
 
 restart_opencpn = true
 rebuild_chart_db = true
 ```
 
-When all three filter lists are empty and both optional flags are false,
-enc-sync discovers existing recognized `ENC/*` folders under `chart_dir` and
-syncs those (useful if you added sources manually in Chart Downloader).
+Configured states, regions, Coast Guard districts, and optional `all_enc` /
+`inland` flags define the **minimum** folders enc-sync always syncs (creating
+them if needed). enc-sync **also** syncs any other recognized `ENC/*` folders
+already present under `chart_dir` — for example if Chart Downloader added
+`ENC/US_FL` but your config only lists CA/OR/WA.
+
+With no config minimums and no recognized folders on disk, enc-sync exits with
+an error.
 
 ## Run
 
@@ -187,7 +193,7 @@ stays scoped to its folder. No refilter step is needed.
 
 Optional flags:
 
-- `all_enc = true` — also sync `ENC/US` (national catalog)
+- `all_enc = true` — at least sync `ENC/US` (national catalog)
 - `inland = true` — sync US Army Corps folders `US_INLAND`, `US_INLAND_BUOYS`,
   `US_INLAND_OVERLAYS`
 

@@ -248,9 +248,6 @@ mod tests {
             name: name.to_string(),
             url: format!("https://example.test/{name}.zip"),
             timestamp: 1_700_000_000,
-            states: vec!["CA".to_string()],
-            regions: vec![],
-            coast_guard_districts: vec![],
         }
     }
 

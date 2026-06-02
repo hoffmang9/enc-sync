@@ -26,7 +26,6 @@
 mod catalog;
 mod charts;
 mod config;
-mod filters;
 mod opencpn;
 mod sources;
 #[cfg(any(test, feature = "test-helpers"))]
@@ -42,25 +41,8 @@ use charts::{
     cell_key, download_catalog, download_cell, load_update_data, needs_update, save_update_data,
 };
 use config::prepare_chart_dir;
-use filters::Filters;
 use opencpn::restart_opencpn;
-use sources::{enc_root, select_sources, ChartSource as Source};
-
-fn catalog_url(config: &Config, source: &Source) -> String {
-    if let Some(base) = config
-        .catalog_base_url
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        return format!(
-            "{}/{}",
-            base.trim_end_matches('/'),
-            source.catalog_filename
-        );
-    }
-    source.catalog_url.clone()
-}
+use sources::{enc_root, select_sources};
 
 /// Controls whether enc-sync downloads chart cells or only refreshes catalogs.
 #[derive(Debug, Clone, Copy, Default)]
@@ -76,13 +58,17 @@ pub fn run(config: &Config) -> Result<()> {
 
 pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     prepare_chart_dir(&enc_root(config))?;
-    let filters = Filters::from_config(config);
-    let sources = select_sources(config, &filters)?;
+    let sources = select_sources(config)?;
 
     log::info!("Syncing {} chart source(s)", sources.len());
-    if filters.is_active() {
-        let (states, regions, cgd) = filters.active_counts();
-        log::info!("Filters active: {states} state(s), {regions} region(s), {cgd} CG district(s)");
+    if !config.states.is_empty() || !config.regions.is_empty() || !config.coast_guard_districts.is_empty()
+    {
+        log::info!(
+            "Filters active: {} state(s), {} region(s), {} CG district(s)",
+            config.states.len(),
+            config.regions.len(),
+            config.coast_guard_districts.len()
+        );
     }
     if config.all_enc {
         log::info!("Including national ENC/US catalog");
@@ -91,16 +77,17 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
         log::info!("Including US Army Corps inland ENC catalogs");
     }
 
+    let enc_root = enc_root(config);
     let mut failed = Vec::new();
     let mut updated = 0usize;
 
     for source in &sources {
         log::info!("Source {} → {}", source.name, source.folder);
-        match sync_source(config, source, options) {
+        match sync_source(config, &enc_root, source, options) {
             Ok(count) => updated += count,
             Err(error) => {
                 log::error!("Failed syncing {}: {:#}", source.folder, error);
-                failed.push(source.folder.clone());
+                failed.push(source.folder.to_string());
             }
         }
     }
@@ -119,12 +106,20 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     finalize(failed)
 }
 
-fn sync_source(config: &Config, source: &Source, options: RunOptions) -> Result<usize> {
-    let chart_dir = source.chart_dir(&enc_root(config));
+fn sync_source(
+    config: &Config,
+    enc_root: &std::path::Path,
+    source: &ChartSource,
+    options: RunOptions,
+) -> Result<usize> {
+    let chart_dir = source.chart_dir(enc_root);
     prepare_chart_dir(&chart_dir)?;
 
-    let catalog_path =
-        download_catalog(&catalog_url(config, source), &chart_dir, &source.catalog_filename)?;
+    let catalog_path = download_catalog(
+        &source.resolve_catalog_url(config),
+        &chart_dir,
+        source.catalog_filename,
+    )?;
 
     if options.catalog_only {
         return Ok(0);

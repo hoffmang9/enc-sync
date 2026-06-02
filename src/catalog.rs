@@ -11,9 +11,6 @@ pub struct Cell {
     pub name: String,
     pub url: String,
     pub timestamp: i64,
-    pub states: Vec<String>,
-    pub regions: Vec<String>,
-    pub coast_guard_districts: Vec<String>,
 }
 
 pub fn parse_catalog(catalog_path: &Path) -> Result<Vec<Cell>> {
@@ -25,50 +22,30 @@ pub fn parse_catalog(catalog_path: &Path) -> Result<Vec<Cell>> {
     let mut buf = Vec::new();
     let mut in_cell = false;
     let mut current: Option<CellBuilder> = None;
-    let mut nested = None::<NestedField>;
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(tag)) => {
-                let name = tag.name().as_ref().to_vec();
-                let tag_name = String::from_utf8_lossy(&name).into_owned();
-                match tag_name.as_str() {
-                    "cell" | "Cell" => {
-                        in_cell = true;
-                        current = Some(CellBuilder::default());
+                let tag_name = String::from_utf8_lossy(tag.name().as_ref()).into_owned();
+                if tag_name == "cell" || tag_name == "Cell" {
+                    in_cell = true;
+                    current = Some(CellBuilder::default());
+                } else if in_cell {
+                    if let Some(builder) = current.as_mut() {
+                        builder.start_field(&tag_name);
                     }
-                    "state" if in_cell => nested = Some(NestedField::State),
-                    "region" if in_cell => nested = Some(NestedField::Region),
-                    "coast_guard_district" if in_cell => nested = Some(NestedField::Cgd),
-                    field if in_cell => {
-                        if let Some(builder) = current.as_mut() {
-                            builder.start_field(field);
-                        }
-                    }
-                    _ => {}
                 }
             }
             Ok(Event::Text(text)) => {
-                let value = text.unescape()?.into_owned();
-                if let Some(field) = nested.take() {
-                    if let Some(builder) = current.as_mut() {
-                        builder.push_nested(field, value);
-                    }
-                    continue;
-                }
                 if in_cell {
                     if let Some(builder) = current.as_mut() {
-                        builder.push_text(value);
+                        builder.push_text(text.unescape()?.into_owned());
                     }
                 }
             }
             Ok(Event::End(tag)) => {
-                let name = tag.name().as_ref().to_vec();
-                let tag_name = String::from_utf8_lossy(&name).into_owned();
+                let tag_name = String::from_utf8_lossy(tag.name().as_ref()).into_owned();
                 match tag_name.as_str() {
-                    "state" | "region" | "coast_guard_district" => {
-                        nested = None;
-                    }
                     "cell" | "Cell" => {
                         if let Some(builder) = current.take() {
                             if let Some(cell) = builder.finish()? {
@@ -121,22 +98,12 @@ fn parse_ienc_timestamp(date: &str, time: &str) -> Result<i64> {
     Ok(NaiveDateTime::new(date, time).and_utc().timestamp())
 }
 
-#[derive(Clone, Copy)]
-enum NestedField {
-    State,
-    Region,
-    Cgd,
-}
-
 #[derive(Default)]
 struct CellBuilder {
     name: Option<String>,
     url: Option<String>,
     timestamp: Option<i64>,
     timestamp_error: Option<anyhow::Error>,
-    states: Vec<String>,
-    regions: Vec<String>,
-    coast_guard_districts: Vec<String>,
     current_field: Option<String>,
     current_text: String,
     in_s57_file: bool,
@@ -191,18 +158,6 @@ impl CellBuilder {
         self.current_text.push_str(&value);
     }
 
-    fn push_nested(&mut self, field: NestedField, value: String) {
-        let value = value.trim().to_string();
-        if value.is_empty() {
-            return;
-        }
-        match field {
-            NestedField::State => self.states.push(value),
-            NestedField::Region => self.regions.push(value),
-            NestedField::Cgd => self.coast_guard_districts.push(value),
-        }
-    }
-
     fn finish(self) -> Result<Option<Cell>> {
         if let Some(error) = self.timestamp_error {
             let name = self.name.as_deref().unwrap_or("<unknown>");
@@ -229,14 +184,7 @@ impl CellBuilder {
             return Ok(None);
         };
 
-        Ok(Some(Cell {
-            name,
-            url,
-            timestamp,
-            states: self.states,
-            regions: self.regions,
-            coast_guard_districts: self.coast_guard_districts,
-        }))
+        Ok(Some(Cell { name, url, timestamp }))
     }
 }
 
@@ -258,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_catalog_reads_cells_and_metadata() {
+    fn parse_catalog_reads_cells() {
         let dir = TempDir::new().unwrap();
         let catalog_path = dir.path().join("ENCProdCat.xml");
         fs::write(
@@ -269,15 +217,11 @@ mod tests {
     <name>US5CA01M</name>
     <zipfile_location>https://charts.noaa.gov/US5CA01M.zip</zipfile_location>
     <zipfile_datetime_iso8601>2024-06-01T00:00:00Z</zipfile_datetime_iso8601>
-    <state>CA</state>
-    <region>11</region>
-    <coast_guard_district>11</coast_guard_district>
   </cell>
   <cell>
     <name>US5OR02M</name>
     <zipfile_location>https://charts.noaa.gov/US5OR02M.zip</zipfile_location>
     <zipfile_datetime_iso8601>2024-06-02T00:00:00Z</zipfile_datetime_iso8601>
-    <state>OR</state>
   </cell>
   <cell>
     <name>INCOMPLETE</name>
@@ -292,9 +236,6 @@ mod tests {
 
         let ca = cells.iter().find(|c| c.name == "US5CA01M").unwrap();
         assert_eq!(ca.url, "https://charts.noaa.gov/US5CA01M.zip");
-        assert_eq!(ca.states, vec!["CA"]);
-        assert_eq!(ca.regions, vec!["11"]);
-        assert_eq!(ca.coast_guard_districts, vec!["11"]);
         assert_eq!(
             ca.timestamp,
             parse_catalog_timestamp("2024-06-01T00:00:00Z").unwrap()

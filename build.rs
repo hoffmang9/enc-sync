@@ -1,0 +1,189 @@
+use std::env;
+use std::fs;
+use std::path::Path;
+
+use quick_xml::events::Event;
+use quick_xml::Reader;
+
+const OPENCPN_SOURCES_XML: &str = include_str!("data/opencpn_enc_sources.xml");
+const EXPECTED_SOURCE_COUNT: usize = 68;
+const USERDATA_PREFIX: &str = "{USERDATA}/";
+
+fn main() {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let xml_path = Path::new(&manifest_dir).join("data/opencpn_enc_sources.xml");
+    println!("cargo:rerun-if-changed={}", xml_path.display());
+
+    let sources = parse_sources(OPENCPN_SOURCES_XML).expect("parse embedded OpenCPN sources XML");
+    assert_eq!(
+        sources.len(),
+        EXPECTED_SOURCE_COUNT,
+        "expected {EXPECTED_SOURCE_COUNT} chart sources in opencpn_enc_sources.xml, found {}",
+        sources.len()
+    );
+
+    let out_dir = env::var("OUT_DIR").expect("OUT_DIR");
+    let out_path = Path::new(&out_dir).join("sources_generated.rs");
+    fs::write(&out_path, generate_rust(&sources)).expect("write sources_generated.rs");
+}
+
+#[derive(Debug)]
+struct SourceRecord {
+    name: String,
+    catalog_url: String,
+    catalog_filename: String,
+    folder: String,
+    kind: String,
+}
+
+fn parse_sources(xml: &str) -> Result<Vec<SourceRecord>, String> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut sources = Vec::new();
+    let mut buf = Vec::new();
+    let mut in_catalog = false;
+    let mut current_field = None::<String>;
+    let mut current_text = String::new();
+    let mut current_name = None::<String>;
+    let mut current_location = None::<String>;
+    let mut current_dir = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(tag)) => {
+                let field = String::from_utf8_lossy(tag.name().as_ref()).into_owned();
+                if field == "catalog" {
+                    in_catalog = true;
+                    current_name = None;
+                    current_location = None;
+                    current_dir = None;
+                } else if in_catalog {
+                    current_field = Some(field);
+                    current_text.clear();
+                }
+            }
+            Ok(Event::Text(text)) if in_catalog && current_field.is_some() => {
+                current_text.push_str(&text.unescape().map_err(|e| e.to_string())?);
+            }
+            Ok(Event::End(tag)) => {
+                let field = String::from_utf8_lossy(tag.name().as_ref()).into_owned();
+                if field == "catalog" {
+                    if let (Some(name), Some(location), Some(dir)) =
+                        (current_name.take(), current_location.take(), current_dir.take())
+                    {
+                        if let Some(record) = build_record(name, location, dir) {
+                            sources.push(record);
+                        }
+                    }
+                    in_catalog = false;
+                } else if in_catalog {
+                    let value = std::mem::take(&mut current_text).trim().to_string();
+                    current_field = None;
+                    if value.is_empty() {
+                        continue;
+                    }
+                    match field.as_str() {
+                        "name" => current_name = Some(value),
+                        "location" => current_location = Some(value),
+                        "dir" => current_dir = Some(value),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        buf.clear();
+    }
+
+    sources.sort_by(|a, b| a.folder.cmp(&b.folder));
+    Ok(sources)
+}
+
+fn build_record(name: String, location: String, dir: String) -> Option<SourceRecord> {
+    let rel = dir.strip_prefix(USERDATA_PREFIX)?.trim_start_matches('/');
+    let folder = rel.rsplit('/').next()?.to_string();
+    let kind = classify_folder(&folder)?;
+    Some(SourceRecord {
+        catalog_filename: catalog_filename(&location).to_string(),
+        name,
+        catalog_url: location,
+        folder,
+        kind,
+    })
+}
+
+fn catalog_filename(url: &str) -> &str {
+    url.rsplit('/')
+        .next()
+        .filter(|part| !part.is_empty())
+        .unwrap_or("catalog.xml")
+}
+
+fn normalize_numeric_code(raw: &str) -> String {
+    let trimmed = raw.trim().to_ascii_uppercase();
+    let stripped = trimmed.trim_start_matches('0');
+    if stripped.is_empty() {
+        "0".to_string()
+    } else {
+        stripped.to_string()
+    }
+}
+
+fn classify_folder(folder: &str) -> Option<String> {
+    if folder == "US" {
+        return Some("SourceKind::All".to_string());
+    }
+    if folder == "US_INLAND" {
+        return Some("SourceKind::InlandMain".to_string());
+    }
+    if folder == "US_INLAND_BUOYS" {
+        return Some("SourceKind::InlandBuoys".to_string());
+    }
+    if folder == "US_INLAND_OVERLAYS" {
+        return Some("SourceKind::InlandOverlays".to_string());
+    }
+    if let Some(code) = folder.strip_prefix("US_CGD") {
+        let code = normalize_numeric_code(code);
+        return Some(format!("SourceKind::CoastGuardDistrict({code:?})"));
+    }
+    if let Some(code) = folder.strip_prefix("US_REGION") {
+        let code = normalize_numeric_code(code);
+        return Some(format!("SourceKind::Region({code:?})"));
+    }
+    if let Some(code) = folder.strip_prefix("US_") {
+        let code = code.to_ascii_uppercase();
+        return Some(format!("SourceKind::State({code:?})"));
+    }
+    None
+}
+
+fn generate_rust(sources: &[SourceRecord]) -> String {
+    let mut out = String::from("// @generated by build.rs — do not edit\n\n");
+    out.push_str("pub(super) static EMBEDDED_SOURCES: &[ChartSource] = &[\n");
+    for source in sources {
+        out.push_str("    ChartSource {\n");
+        out.push_str(&format!(
+            "        name: {:?},\n",
+            source.name
+        ));
+        out.push_str(&format!(
+            "        catalog_url: {:?},\n",
+            source.catalog_url
+        ));
+        out.push_str(&format!(
+            "        catalog_filename: {:?},\n",
+            source.catalog_filename
+        ));
+        out.push_str(&format!(
+            "        folder: {:?},\n",
+            source.folder
+        ));
+        out.push_str(&format!("        kind: {},\n", source.kind));
+        out.push_str("    },\n");
+    }
+    out.push_str("];\n");
+    out
+}

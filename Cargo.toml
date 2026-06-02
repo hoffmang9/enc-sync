@@ -32,6 +32,9 @@ shellexpand = "3"
 dirs = "6"
 tempfile = "3"
 
+[build-dependencies]
+quick-xml = "0.37"
+
 [dev-dependencies]
 tiny_http = "0.12"
 

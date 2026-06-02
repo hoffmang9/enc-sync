@@ -17,18 +17,15 @@
 # mirror Chart Downloader defaults, e.g. ENC/US_CA, ENC/US_OR, ENC/US_REGION14.
 chart_dir = "~/Documents/Charts"
 
-# Select which OpenCPN chart folders to sync. A folder is included when it
-# matches ANY non-empty list below.
+# Sync at least these OpenCPN chart folders (created if missing). enc-sync also
+# syncs any other recognized ENC/* folders already on disk (union, not either/or).
 states = ["CA", "OR", "WA"]
 regions = []                 # e.g. "14", "15" → ENC/US_REGION14
 coast_guard_districts = []     # e.g. "13" → ENC/US_CGD13
 
 # Optional extras (off by default):
-# all_enc = true               # also sync ENC/US (national catalog)
-# inland = true                # US Army Corps: US_INLAND, US_INLAND_BUOYS, US_INLAND_OVERLAYS
-
-# When all filters above are empty and both flags are false, enc-sync discovers
-# existing recognized ENC/* folders under chart_dir and syncs those.
+# all_enc = true               # at least sync ENC/US (national catalog)
+# inland = true                # at least sync US Army Corps inland folders
 
 # After a successful download, quit and relaunch OpenCPN.
 restart_opencpn = true
