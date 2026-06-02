@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc2] - 2026-06-01
+
 ### Added
 
 - Multi-folder layout mirroring OpenCPN Chart Downloader defaults under
@@ -29,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folders on disk.
 - Removed single-folder filtered `ENCProdCat.xml` / `ENCProdCat.upstream.xml`
   behavior and `--catalog-only --local`.
+- Per-cell download progress in logs.
 
 ### Fixed
 

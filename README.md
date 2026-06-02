@@ -24,12 +24,12 @@ archive for your platform from the
 [Releases](https://github.com/hoffmang9/enc-sync/releases) page.
 
 Archives are named `enc-sync-<version>-<platform>.tar.gz` (or `.zip` on Windows). The
-current release line is **1.0.0-rc1** (first release candidate toward 1.0.0). After
+current release line is **1.0.0-rc2** (second release candidate toward 1.0.0). After
 extracting, the binary is one directory deep inside the archive (for example
-`enc-sync-1.0.0-rc1-x86_64-unknown-linux-musl/enc-sync`). Each archive also includes
+`enc-sync-1.0.0-rc2-x86_64-unknown-linux-musl/enc-sync`). Each archive also includes
 this `README.md` for install and usage notes.
 
-Replace `<version>` below with the release you downloaded (for example `1.0.0-rc1`).
+Replace `<version>` below with the release you downloaded (for example `1.0.0-rc2`).
 
 ### Linux (x86_64 and Raspberry Pi aarch64)
 
@@ -240,7 +240,7 @@ scope).
 ### Cutting a release
 
 Bump the version in `Cargo.toml`, commit, merge to `main`, wait for CI to pass, then tag
-that commit and push the tag (`git tag 1.0.0-rc1 && git push origin 1.0.0-rc1`). The tag
+that commit and push the tag (`git tag 1.0.0-rc2 && git push origin 1.0.0-rc2`). The tag
 name must match the semver in `Cargo.toml` (no `v` prefix). The
 [Release workflow](.github/workflows/release.yml) verifies CI succeeded on the tagged
 commit, builds all targets, and uploads versioned files to the GitHub Release.

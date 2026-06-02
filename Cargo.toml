@@ -1,6 +1,6 @@
 [package]
 name = "enc-sync"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 edition = "2021"
 description = "Sync NOAA ENC charts for OpenCPN using multi-folder Chart Downloader layout"
 license = "Apache-2.0"
