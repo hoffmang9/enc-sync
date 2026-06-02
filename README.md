@@ -4,10 +4,12 @@ Standalone cron-friendly tool that downloads updated US NOAA ENC cells into an
 [OpenCPN](https://opencpn.org/) Chart Downloader-compatible directory, then
 optionally restarts OpenCPN with a full chart database rebuild (`-D`).
 
-The tool mirrors OpenCPN's Chart Downloader behavior: it reads NOAA's
-`ENCProdCat.xml`, compares cell timestamps to `chartdldr_pi.dat` and on-disk
-cells, downloads only what changed, and extracts zips with the same `ENC_ROOT/`
-strip used by the plugin.
+The tool mirrors OpenCPN's Chart Downloader layout: each NOAA or US Army Corps
+catalog syncs into its own folder under `{chart_dir}/ENC/` (for example
+`ENC/US_CA`, `ENC/US_OR`, `ENC/US_REGION14`, `ENC/US_INLAND`). Within each
+folder, enc-sync downloads the catalog, compares cell timestamps to
+`chartdldr_pi.dat`, updates changed cells, and extracts zips with the same
+`ENC_ROOT/` strip used by the plugin.
 
 NOAA publishes ENC updates **every weekday evening** (Monday–Friday).
 
@@ -104,19 +106,24 @@ cp enc-sync.example.toml ~/.enc-sync/config.toml
 ```
 
 ```toml
-chart_dir = "~/Charts/ENC/US"
-catalog_url = "https://www.charts.noaa.gov/ENCs/ENCProdCat.xml"
+chart_dir = "~/Documents/Charts"
 
-# A cell is updated if it matches ANY non-empty list below.
-states = ["CA", "OR", "WA"]
-regions = []                 # e.g. "14", "15"
-coast_guard_districts = []     # e.g. "11", "13"
+# Select OpenCPN chart folders to sync (matches ANY non-empty list):
+states = ["CA", "OR", "WA"]      # ENC/US_CA, ENC/US_OR, ENC/US_WA
+regions = []                     # e.g. "14" → ENC/US_REGION14
+coast_guard_districts = []       # e.g. "13" → ENC/US_CGD13
+
+# Optional extras:
+# all_enc = true                 # also sync ENC/US (national catalog)
+# inland = true                  # US Army Corps inland catalogs
 
 restart_opencpn = true
 rebuild_chart_db = true
 ```
 
-Leave all three filter lists empty to keep the entire catalog current.
+When all three filter lists are empty and both optional flags are false,
+enc-sync discovers existing recognized `ENC/*` folders under `chart_dir` and
+syncs those (useful if you added sources manually in Chart Downloader).
 
 ## Run
 
@@ -139,6 +146,15 @@ If `--config` is omitted, `enc-sync` looks for config in this order:
 
 While downloading, logs show progress as `Downloading <cell> (N of total)`.
 
+### Catalog-only mode
+
+```bash
+enc-sync --config ~/.enc-sync/config.toml --catalog-only
+```
+
+Always downloads the latest catalog from NOAA (or ACE) for each selected source,
+overwriting any local copy, without downloading chart cells or restarting OpenCPN.
+
 ## Cron
 
 Use an explicit path to the machine-wide config:
@@ -151,11 +167,33 @@ On most days nothing will have changed and the run exits quickly.
 
 ## OpenCPN integration
 
-- Chart directory layout and `chartdldr_pi.dat` are compatible with OpenCPN's
-  Chart Downloader plugin.
-- When downloads succeed, the tool runs `opencpn --remote -q` and relaunches
-  OpenCPN with `-D` to rebuild the chart database.
-- If nothing changed, a running OpenCPN instance is left alone.
+enc-sync uses the same folder names and catalog URLs as OpenCPN Chart Downloader
+(built from OpenCPN's `chart_sources.xml`).
+
+### Recommended setup for CA / OR / WA
+
+1. Set `chart_dir` to your OpenCPN **BaseChartDir** (for example
+   `~/Documents/Charts`).
+2. Configure `states = ["CA", "OR", "WA"]` in enc-sync.
+3. In OpenCPN Chart Downloader, add three catalogs (or let enc-sync create the
+   folders on first run):
+   - **CA - California** → `ENC/US_CA`
+   - **OR - Oregon** → `ENC/US_OR`
+   - **WA - Washington** → `ENC/US_WA`
+4. Run enc-sync. Each state's catalog and cells live in its own folder.
+
+Chart Downloader's **Update** button works normally per source — each catalog
+stays scoped to its folder. No refilter step is needed.
+
+Optional flags:
+
+- `all_enc = true` — also sync `ENC/US` (national catalog)
+- `inland = true` — sync US Army Corps folders `US_INLAND`, `US_INLAND_BUOYS`,
+  `US_INLAND_OVERLAYS`
+
+When chart downloads succeed, enc-sync runs `opencpn --remote -q` and relaunches
+OpenCPN with `-D` to rebuild the chart database (when configured). If nothing
+changed, a running OpenCPN instance is left alone.
 
 ## Development
 

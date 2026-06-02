@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Multi-folder layout mirroring OpenCPN Chart Downloader defaults under
+  `{chart_dir}/ENC/` (states, regions, Coast Guard districts, national `US`,
+  and US Army Corps inland catalogs).
+- Embedded OpenCPN `chart_sources.xml` definitions for NOAA ENC and ACE inland
+  catalogs; folder discovery when no filters are configured.
+- Config flags `all_enc` and `inland`; optional `catalog_base_url` for tests or
+  mirrors.
+- IENC (US Army Corps) catalog parsing support.
+- `--catalog-only` CLI mode refreshes catalogs without downloading cells.
+
+### Changed
+
+- **Breaking:** `chart_dir` is now OpenCPN's base chart directory (parent of
+  `ENC/`), not a single catalog folder. State/region/CGD filters select which
+  OpenCPN chart folders to sync instead of filtering a national catalog in place.
+- Removed single-folder filtered `ENCProdCat.xml` / `ENCProdCat.upstream.xml`
+  behavior and `--catalog-only --local`.
+
+### Fixed
+
+- Chart Downloader compatibility: each source uses its own scoped NOAA catalog
+  (e.g. `CA_ENCProdCat.xml` in `ENC/US_CA`), so **Update** works without
+  refiltering.
+
 ## [1.0.0-rc1] - 2026-06-01
 
 Initial public release of **enc-sync**, a cron-friendly tool that keeps NOAA ENC

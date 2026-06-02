@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use crate::catalog::Cell;
 use crate::config::Config;
 
 #[derive(Debug, Clone)]
@@ -14,8 +13,18 @@ impl Filters {
     pub fn from_config(config: &Config) -> Self {
         Self {
             states: normalize_codes(&config.states),
-            regions: normalize_codes(&config.regions),
-            coast_guard_districts: normalize_codes(&config.coast_guard_districts),
+            regions: config
+                .regions
+                .iter()
+                .map(|value| normalize_numeric_code(value))
+                .filter(|value| !value.is_empty())
+                .collect(),
+            coast_guard_districts: config
+                .coast_guard_districts
+                .iter()
+                .map(|value| normalize_numeric_code(value))
+                .filter(|value| !value.is_empty())
+                .collect(),
         }
     }
 
@@ -33,23 +42,18 @@ impl Filters {
         )
     }
 
-    pub fn matches(&self, cell: &Cell) -> bool {
-        if !self.is_active() {
-            return true;
-        }
-        dimension_matches(&self.states, &cell.states)
-            || dimension_matches(&self.regions, &cell.regions)
-            || dimension_matches(&self.coast_guard_districts, &cell.coast_guard_districts)
+    pub fn matches_state(&self, state: &str) -> bool {
+        self.states.contains(&state.trim().to_ascii_uppercase())
     }
-}
 
-fn dimension_matches(filter: &HashSet<String>, values: &[String]) -> bool {
-    if filter.is_empty() {
-        return false;
+    pub fn matches_region(&self, region: &str) -> bool {
+        self.regions.contains(&normalize_numeric_code(region))
     }
-    values
-        .iter()
-        .any(|value| filter.contains(&value.trim().to_ascii_uppercase()))
+
+    pub fn matches_cgd(&self, district: &str) -> bool {
+        self.coast_guard_districts
+            .contains(&normalize_numeric_code(district))
+    }
 }
 
 fn normalize_codes(values: &[String]) -> HashSet<String> {
@@ -60,31 +64,31 @@ fn normalize_codes(values: &[String]) -> HashSet<String> {
         .collect()
 }
 
+fn normalize_numeric_code(raw: &str) -> String {
+    let trimmed = raw.trim().to_ascii_uppercase();
+    let stripped = trimmed.trim_start_matches('0');
+    if stripped.is_empty() {
+        "0".to_string()
+    } else {
+        stripped.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::Cell;
-    use crate::config::{default_catalog_url, Config};
+    use crate::config::Config;
     use std::path::PathBuf;
-
-    fn sample_cell(name: &str, states: &[&str], regions: &[&str], cgd: &[&str]) -> Cell {
-        Cell {
-            name: name.to_string(),
-            url: format!("https://example.test/{name}.zip"),
-            timestamp: 1_700_000_000,
-            states: states.iter().map(|s| (*s).to_string()).collect(),
-            regions: regions.iter().map(|r| (*r).to_string()).collect(),
-            coast_guard_districts: cgd.iter().map(|d| (*d).to_string()).collect(),
-        }
-    }
 
     fn test_config(states: Vec<&str>, regions: Vec<&str>, cgd: Vec<&str>) -> Config {
         Config {
             chart_dir: PathBuf::from("/tmp/charts"),
-            catalog_url: default_catalog_url(),
             states: states.into_iter().map(str::to_string).collect(),
             regions: regions.into_iter().map(str::to_string).collect(),
             coast_guard_districts: cgd.into_iter().map(str::to_string).collect(),
+            all_enc: false,
+            inland: false,
+            catalog_base_url: None,
             restart_opencpn: true,
             rebuild_chart_db: true,
         }
@@ -102,68 +106,16 @@ mod tests {
     }
 
     #[test]
-    fn inactive_filters_match_every_cell() {
-        let filters = Filters::from_config(&test_config(vec![], vec![], vec![]));
-        assert!(!filters.is_active());
-        let cell = sample_cell("US5FL01M", &["FL"], &[], &[]);
-        assert!(filters.matches(&cell));
-    }
-
-    #[test]
-    fn filter_matches_state_or_region() {
+    fn filter_matches_state_or_region_or_cgd() {
         let filters = Filters::from_config(&test_config(vec!["CA"], vec![], vec![]));
-        let cell = sample_cell("US5CA01M", &["CA"], &[], &[]);
-        assert!(filters.matches(&cell));
+        assert!(filters.matches_state("CA"));
+        assert!(!filters.matches_state("FL"));
 
-        let other = Cell {
-            states: vec!["FL".to_string()],
-            ..cell.clone()
-        };
-        assert!(!filters.matches(&other));
-    }
+        let region_filters = Filters::from_config(&test_config(vec![], vec!["14"], vec![]));
+        assert!(region_filters.matches_region("14"));
 
-    #[test]
-    fn filter_matches_region_when_state_does_not() {
-        let filters = Filters::from_config(&test_config(vec![], vec!["14"], vec![]));
-        let cell = sample_cell("US5WA01M", &["WA"], &["14"], &[]);
-        assert!(filters.matches(&cell));
-
-        let other = sample_cell("US5FL01M", &["FL"], &["5"], &[]);
-        assert!(!filters.matches(&other));
-    }
-
-    #[test]
-    fn filter_matches_coast_guard_district() {
-        let filters = Filters::from_config(&test_config(vec![], vec![], vec!["11"]));
-        let cell = sample_cell("US5CA01M", &[], &[], &["11"]);
-        assert!(filters.matches(&cell));
-
-        let other = sample_cell("US5FL01M", &[], &[], &["7"]);
-        assert!(!filters.matches(&other));
-    }
-
-    #[test]
-    fn filter_state_matching_is_case_insensitive() {
-        let filters = Filters::from_config(&test_config(vec!["CA"], vec![], vec![]));
-        let cell = sample_cell("US5CA01M", &["ca"], &[], &[]);
-        assert!(filters.matches(&cell));
-    }
-
-    #[test]
-    fn filters_from_config_normalizes_codes() {
-        let config = Config {
-            chart_dir: PathBuf::from("/tmp/charts"),
-            catalog_url: default_catalog_url(),
-            states: vec![" ca ".to_string(), "".to_string()],
-            regions: vec!["14".to_string()],
-            coast_guard_districts: vec![],
-            restart_opencpn: true,
-            rebuild_chart_db: true,
-        };
-        let filters = Filters::from_config(&config);
-        assert!(filters.matches(&sample_cell("US5CA01M", &["CA"], &[], &[])));
-        assert!(filters.matches(&sample_cell("US5WA01M", &["WA"], &["14"], &[])));
-        assert!(!filters.matches(&sample_cell("US5OR01M", &["OR"], &[], &[])));
+        let cgd_filters = Filters::from_config(&test_config(vec![], vec![], vec!["11"]));
+        assert!(cgd_filters.matches_cgd("11"));
     }
 
     #[test]

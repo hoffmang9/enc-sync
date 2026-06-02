@@ -7,9 +7,7 @@ use anyhow::{bail, Context, Result};
 use zip::read::ZipArchive;
 
 use crate::catalog::Cell;
-use crate::config::Config;
 
-pub(crate) const CATALOG_FILENAME: &str = "ENCProdCat.xml";
 pub(crate) const UPDATE_DATA_FILENAME: &str = "chartdldr_pi.dat";
 const USER_AGENT: &str = "enc-sync/0.1";
 const ENC_ROOT: &str = "ENC_ROOT";
@@ -45,7 +43,7 @@ pub(crate) fn save_update_data(chart_dir: &Path, data: &BTreeMap<String, i64>) -
     })
 }
 
-fn write_atomically(path: &Path, write: impl FnOnce(&mut File) -> Result<()>) -> Result<()> {
+pub(crate) fn write_atomically(path: &Path, write: impl FnOnce(&mut File) -> Result<()>) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("creating temporary file near {}", path.display()))?;
@@ -133,11 +131,15 @@ fn fetch_url(url: &str) -> Result<Vec<u8>> {
         .with_context(|| format!("reading response body from {url}"))
 }
 
-pub(crate) fn download_catalog(config: &Config) -> Result<PathBuf> {
-    let catalog_path = config.chart_dir.join(CATALOG_FILENAME);
+pub(crate) fn download_catalog(
+    catalog_url: &str,
+    chart_dir: &Path,
+    catalog_filename: &str,
+) -> Result<PathBuf> {
+    let catalog_path = chart_dir.join(catalog_filename);
 
-    log::info!("Downloading catalog {}", config.catalog_url);
-    let catalog_url = config.catalog_url.clone();
+    log::info!("Downloading catalog {}", catalog_url);
+    let catalog_url = catalog_url.to_string();
     write_atomically(&catalog_path, |file| {
         file.write_all(&fetch_url(&catalog_url)?)?;
         Ok(())

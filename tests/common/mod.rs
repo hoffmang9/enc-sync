@@ -43,12 +43,6 @@ pub fn catalog_xml(base_url: &str) -> String {
     <zipfile_datetime_iso8601>2024-06-01T00:00:00Z</zipfile_datetime_iso8601>
     <state>CA</state>
   </cell>
-  <cell>
-    <name>US5FL01M</name>
-    <zipfile_location>{base_url}/US5FL01M.zip</zipfile_location>
-    <zipfile_datetime_iso8601>2024-06-02T00:00:00Z</zipfile_datetime_iso8601>
-    <state>FL</state>
-  </cell>
 </catalog>
 "#
     )
@@ -73,7 +67,7 @@ impl MockHttpServer {
         let handle = thread::spawn(move || {
             for request in server.incoming_requests() {
                 let path = request.url().split('?').next().unwrap_or("");
-                let response = if path.ends_with("ENCProdCat.xml") {
+                let response = if path.ends_with("CA_ENCProdCat.xml") {
                     tiny_http::Response::from_string(catalog.clone()).with_status_code(200)
                 } else if path.ends_with("US5CA01M.zip") {
                     counts.fetch_add(1, Ordering::SeqCst);

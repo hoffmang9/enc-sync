@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use chrono::DateTime;
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
@@ -33,7 +33,7 @@ pub fn parse_catalog(catalog_path: &Path) -> Result<Vec<Cell>> {
                 let name = tag.name().as_ref().to_vec();
                 let tag_name = String::from_utf8_lossy(&name).into_owned();
                 match tag_name.as_str() {
-                    "cell" => {
+                    "cell" | "Cell" => {
                         in_cell = true;
                         current = Some(CellBuilder::default());
                     }
@@ -69,7 +69,7 @@ pub fn parse_catalog(catalog_path: &Path) -> Result<Vec<Cell>> {
                     "state" | "region" | "coast_guard_district" => {
                         nested = None;
                     }
-                    "cell" => {
+                    "cell" | "Cell" => {
                         if let Some(builder) = current.take() {
                             if let Some(cell) = builder.finish()? {
                                 cells.push(cell);
@@ -96,6 +96,7 @@ pub fn parse_catalog(catalog_path: &Path) -> Result<Vec<Cell>> {
 }
 
 fn parse_catalog_timestamp(raw: &str) -> Result<i64> {
+    use chrono::DateTime;
     let raw = raw.trim();
     if let Ok(parsed) = DateTime::parse_from_rfc3339(raw) {
         return Ok(parsed.timestamp());
@@ -106,6 +107,18 @@ fn parse_catalog_timestamp(raw: &str) -> Result<i64> {
         return Ok(parsed.timestamp());
     }
     bail!("parsing catalog timestamp '{raw}'")
+}
+
+fn parse_ienc_timestamp(date: &str, time: &str) -> Result<i64> {
+    let date = NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d")
+        .with_context(|| format!("parsing IENC date '{date}'"))?;
+    let time = if time.trim().is_empty() {
+        NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+    } else {
+        NaiveTime::parse_from_str(time.trim(), "%H:%M:%S")
+            .with_context(|| format!("parsing IENC time '{time}'"))?
+    };
+    Ok(NaiveDateTime::new(date, time).and_utc().timestamp())
 }
 
 #[derive(Clone, Copy)]
@@ -126,19 +139,29 @@ struct CellBuilder {
     coast_guard_districts: Vec<String>,
     current_field: Option<String>,
     current_text: String,
+    in_s57_file: bool,
+    s57_url: Option<String>,
+    s57_date: Option<String>,
+    s57_time: Option<String>,
 }
 
 impl CellBuilder {
     fn start_field(&mut self, field: &str) {
+        if field == "s57_file" {
+            self.in_s57_file = true;
+        }
         self.current_field = Some(field.to_string());
         self.current_text.clear();
     }
 
-    fn push_text(&mut self, value: String) {
-        self.current_text.push_str(&value);
-    }
-
     fn end_field(&mut self, field: &str) {
+        if field == "s57_file" {
+            self.in_s57_file = false;
+            self.current_field = None;
+            self.current_text.clear();
+            return;
+        }
+
         let Some(active) = self.current_field.as_deref() else {
             return;
         };
@@ -157,8 +180,15 @@ impl CellBuilder {
                 Ok(timestamp) => self.timestamp = Some(timestamp),
                 Err(error) => self.timestamp_error = Some(error),
             },
+            "location" if self.in_s57_file => self.s57_url = Some(value.trim().to_string()),
+            "date_posted" if self.in_s57_file => self.s57_date = Some(value.trim().to_string()),
+            "time_posted" if self.in_s57_file => self.s57_time = Some(value.trim().to_string()),
             _ => {}
         }
+    }
+
+    fn push_text(&mut self, value: String) {
+        self.current_text.push_str(&value);
     }
 
     fn push_nested(&mut self, field: NestedField, value: String) {
@@ -178,9 +208,27 @@ impl CellBuilder {
             let name = self.name.as_deref().unwrap_or("<unknown>");
             return Err(error.context(format!("invalid timestamp for catalog cell {name}")));
         }
-        let (Some(name), Some(url), Some(timestamp)) = (self.name, self.url, self.timestamp) else {
+
+        let Some(name) = self.name else {
             return Ok(None);
         };
+
+        let url = if let Some(url) = self.url {
+            url
+        } else if let Some(url) = self.s57_url {
+            url
+        } else {
+            format!("{name}.zip")
+        };
+
+        let timestamp = if let Some(timestamp) = self.timestamp {
+            timestamp
+        } else if let Some(date) = self.s57_date {
+            parse_ienc_timestamp(&date, self.s57_time.as_deref().unwrap_or(""))?
+        } else {
+            return Ok(None);
+        };
+
         Ok(Some(Cell {
             name,
             url,
@@ -276,5 +324,32 @@ mod tests {
             error.to_string().contains("invalid timestamp"),
             "unexpected error: {error:#}"
         );
+    }
+
+    #[test]
+    fn parse_catalog_reads_ienc_cells() {
+        let dir = TempDir::new().unwrap();
+        let catalog_path = dir.path().join("IENCU37ProductsCatalog.xml");
+        fs::write(
+            &catalog_path,
+            r#"<?xml version="1.0"?>
+<IENCU37ProductCatalog>
+  <Cell>
+    <name>AR010001</name>
+    <s57_file>
+      <location>https://example.test/AR010001.zip</location>
+      <date_posted>2024-06-01</date_posted>
+      <time_posted>12:34:56</time_posted>
+    </s57_file>
+  </Cell>
+</IENCU37ProductCatalog>
+"#,
+        )
+        .unwrap();
+
+        let cells = parse_catalog(&catalog_path).unwrap();
+        assert_eq!(cells.len(), 1);
+        assert_eq!(cells[0].name, "AR010001");
+        assert_eq!(cells[0].url, "https://example.test/AR010001.zip");
     }
 }

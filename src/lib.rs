@@ -18,86 +18,96 @@
 //! the binary exits quickly when nothing changed). Example cron:
 //!   0 23 * * 1-5 enc-sync --config ~/.enc-sync/config.toml \
 //!     >>/tmp/enc-sync.log 2>&1
+//!
+//! Chart folders follow OpenCPN Chart Downloader defaults under
+//! `{chart_dir}/ENC/` (states, regions, Coast Guard districts, national,
+//! and US Army Corps inland catalogs).
 
 mod catalog;
 mod charts;
 mod config;
 mod filters;
 mod opencpn;
+mod sources;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_env;
 
 use anyhow::{bail, Result};
 
-pub use catalog::Cell;
+pub use catalog::{parse_catalog, Cell};
 pub use config::{home_dir, load_config, Config};
+pub use sources::ChartSource;
 
-use catalog::parse_catalog;
 use charts::{
     cell_key, download_catalog, download_cell, load_update_data, needs_update, save_update_data,
 };
+use config::prepare_chart_dir;
 use filters::Filters;
 use opencpn::restart_opencpn;
+use sources::{enc_root, select_sources, ChartSource as Source};
+
+fn catalog_url(config: &Config, source: &Source) -> String {
+    if let Some(base) = config
+        .catalog_base_url
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        return format!(
+            "{}/{}",
+            base.trim_end_matches('/'),
+            source.catalog_filename
+        );
+    }
+    source.catalog_url.clone()
+}
+
+/// Controls whether enc-sync downloads chart cells or only refreshes catalogs.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RunOptions {
+    /// Download catalogs for selected sources, but do not download chart cells
+    /// or restart OpenCPN.
+    pub catalog_only: bool,
+}
 
 pub fn run(config: &Config) -> Result<()> {
-    config::prepare_chart_dir(&config.chart_dir)?;
-    let filters = Filters::from_config(config);
+    run_with_options(config, RunOptions::default())
+}
 
+pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
+    prepare_chart_dir(&enc_root(config))?;
+    let filters = Filters::from_config(config);
+    let sources = select_sources(config, &filters)?;
+
+    log::info!("Syncing {} chart source(s)", sources.len());
     if filters.is_active() {
         let (states, regions, cgd) = filters.active_counts();
         log::info!("Filters active: {states} state(s), {regions} region(s), {cgd} CG district(s)");
-    } else {
-        log::info!("No area filters configured; all catalog cells are eligible");
     }
-
-    let catalog_path = download_catalog(config)?;
-    let cells = parse_catalog(&catalog_path)?;
-    log::info!("Catalog lists {} ENC cells", cells.len());
-
-    let mut update_data = load_update_data(&config.chart_dir)?;
-    let pending: Vec<Cell> = cells
-        .into_iter()
-        .filter(|cell| filters.matches(cell))
-        .filter(|cell| needs_update(&config.chart_dir, cell, &update_data))
-        .collect();
+    if config.all_enc {
+        log::info!("Including national ENC/US catalog");
+    }
+    if config.inland {
+        log::info!("Including US Army Corps inland ENC catalogs");
+    }
 
     let mut failed = Vec::new();
     let mut updated = 0usize;
 
-    if pending.is_empty() {
-        log::info!("All filtered catalog cells are up to date on disk");
-    } else {
-        let total = pending.len();
-        log::info!("Downloading {total} updated or new cells");
-        for (index, cell) in pending.into_iter().enumerate() {
-            log::info!("Downloading {} ({} of {total})", cell.name, index + 1);
-            let result = download_cell(&config.chart_dir, &cell);
-            match result {
-                Ok(()) => {
-                    update_data.insert(cell_key(&cell.name), cell.timestamp);
-                    updated += 1;
-                }
-                Err(error) => {
-                    log::error!(
-                        "Failed to update {} ({} of {total}): {:#}",
-                        cell.name,
-                        index + 1,
-                        error
-                    );
-                    failed.push(cell.name);
-                }
+    for source in &sources {
+        log::info!("Source {} → {}", source.name, source.folder);
+        match sync_source(config, source, options) {
+            Ok(count) => updated += count,
+            Err(error) => {
+                log::error!("Failed syncing {}: {:#}", source.folder, error);
+                failed.push(source.folder.clone());
             }
         }
-        if updated > 0 {
-            save_update_data(&config.chart_dir, &update_data)?;
-        }
-        if !failed.is_empty() {
-            let preview: Vec<_> = failed.iter().take(10).cloned().collect();
-            log::error!("{} cells failed: {}", failed.len(), preview.join(", "));
-            if failed.len() > 10 {
-                log::error!("... and {} more", failed.len() - 10);
-            }
-        }
+    }
+
+    if options.catalog_only {
+        log::info!("Catalog-only mode; skipping OpenCPN restart");
+        return finalize(failed);
     }
 
     if updated > 0 && config.restart_opencpn {
@@ -106,9 +116,60 @@ pub fn run(config: &Config) -> Result<()> {
         log::info!("No chart files changed; leaving OpenCPN running");
     }
 
+    finalize(failed)
+}
+
+fn sync_source(config: &Config, source: &Source, options: RunOptions) -> Result<usize> {
+    let chart_dir = source.chart_dir(&enc_root(config));
+    prepare_chart_dir(&chart_dir)?;
+
+    let catalog_path =
+        download_catalog(&catalog_url(config, source), &chart_dir, &source.catalog_filename)?;
+
+    if options.catalog_only {
+        return Ok(0);
+    }
+
+    let cells = parse_catalog(&catalog_path)?;
+    log::info!(
+        "{} lists {} chart cells",
+        source.catalog_filename,
+        cells.len()
+    );
+
+    let mut update_data = load_update_data(&chart_dir)?;
+    let pending: Vec<_> = cells
+        .into_iter()
+        .filter(|cell| needs_update(&chart_dir, cell, &update_data))
+        .collect();
+
+    if pending.is_empty() {
+        log::info!("All cells up to date in {}", chart_dir.display());
+        return Ok(0);
+    }
+
+    let total = pending.len();
+    log::info!("Downloading {total} updated or new cells into {}", source.folder);
+    let mut updated = 0usize;
+    for (index, cell) in pending.into_iter().enumerate() {
+        log::info!(
+            "[{}] Downloading {} ({} of {total})",
+            source.folder,
+            cell.name,
+            index + 1
+        );
+        download_cell(&chart_dir, &cell)?;
+        update_data.insert(cell_key(&cell.name), cell.timestamp);
+        updated += 1;
+    }
+    save_update_data(&chart_dir, &update_data)?;
+    Ok(updated)
+}
+
+fn finalize(failed: Vec<String>) -> Result<()> {
     if failed.is_empty() {
         Ok(())
     } else {
-        bail!("{} cell(s) failed to update", failed.len())
+        bail!("{} chart source(s) failed: {}", failed.len(), failed.join(", "))
     }
 }

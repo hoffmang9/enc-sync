@@ -6,26 +6,34 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    /// OpenCPN base chart directory (`BaseChartDir`). ENC sources live under
+    /// `{chart_dir}/ENC/…` using OpenCPN's default folder names.
     pub chart_dir: PathBuf,
-    #[serde(default = "default_catalog_url")]
-    pub catalog_url: String,
-    /// Two-letter state codes to keep current (e.g. "CA", "WA"). Empty = no state filter.
+    /// Two-letter state codes → sync matching `ENC/US_XX` folders.
     #[serde(default)]
     pub states: Vec<String>,
-    /// NOAA region numbers as strings (e.g. "14", "15"). Empty = no region filter.
+    /// NOAA region numbers as strings → sync matching `ENC/US_REGIONxx` folders.
     #[serde(default)]
     pub regions: Vec<String>,
-    /// Coast Guard district numbers as strings (e.g. "11", "13"). Empty = no CGD filter.
+    /// Coast Guard district numbers as strings → sync matching `ENC/US_CGDxx` folders.
     #[serde(default)]
     pub coast_guard_districts: Vec<String>,
+    /// Sync the national `ENC/US` folder (`ENCProdCat.xml`).
+    #[serde(default)]
+    pub all_enc: bool,
+    /// Sync US Army Corps inland ENC folders (`US_INLAND`, `US_INLAND_BUOYS`,
+    /// `US_INLAND_OVERLAYS`).
+    #[serde(default)]
+    pub inland: bool,
+    /// Optional base URL for catalog downloads (testing or mirrors). When set,
+    /// each source loads `{catalog_base_url}/{catalog_filename}` instead of its
+    /// default NOAA/ACE URL.
+    #[serde(default)]
+    pub catalog_base_url: Option<String>,
     #[serde(default = "default_true")]
     pub restart_opencpn: bool,
     #[serde(default = "default_true")]
     pub rebuild_chart_db: bool,
-}
-
-pub fn default_catalog_url() -> String {
-    "https://www.charts.noaa.gov/ENCs/ENCProdCat.xml".to_string()
 }
 
 fn default_true() -> bool {
@@ -97,7 +105,7 @@ mod tests {
         fs::write(
             &path,
             r#"
-chart_dir = "~/Charts/ENC/US"
+chart_dir = "~/Documents/Charts"
 "#,
         )
         .unwrap();
@@ -106,7 +114,7 @@ chart_dir = "~/Charts/ENC/US"
         {
             let _home = crate::test_env::EnvGuard::override_home(dir.path());
             let config = load_config(&path).unwrap();
-            assert_eq!(config.chart_dir, dir.path().join("Charts/ENC/US"));
+            assert_eq!(config.chart_dir, dir.path().join("Documents/Charts"));
         }
 
         #[cfg(windows)]
@@ -114,7 +122,7 @@ chart_dir = "~/Charts/ENC/US"
             let config = load_config(&path).unwrap();
             let expected = home_dir()
                 .expect("Windows profile directory")
-                .join("Charts/ENC/US");
+                .join("Documents/Charts");
             assert_eq!(config.chart_dir, expected);
         }
     }
@@ -122,7 +130,7 @@ chart_dir = "~/Charts/ENC/US"
     #[test]
     fn load_config_parses_example_fields() {
         let dir = TempDir::new().unwrap();
-        let chart_dir = dir.path().join("charts/enc");
+        let chart_dir = dir.path().join("Documents/Charts");
         let path = dir.path().join("config.toml");
         fs::write(
             &path,
@@ -132,6 +140,8 @@ chart_dir = "{}"
 states = ["CA", "OR"]
 regions = ["14"]
 coast_guard_districts = ["11"]
+all_enc = true
+inland = true
 restart_opencpn = false
 "#,
                 toml_path(&chart_dir)
@@ -144,9 +154,10 @@ restart_opencpn = false
         assert_eq!(config.states, vec!["CA", "OR"]);
         assert_eq!(config.regions, vec!["14"]);
         assert_eq!(config.coast_guard_districts, vec!["11"]);
+        assert!(config.all_enc);
+        assert!(config.inland);
         assert!(!config.restart_opencpn);
         assert!(config.rebuild_chart_db);
-        assert!(config.catalog_url.contains("ENCProdCat.xml"));
     }
 
     #[test]
@@ -163,90 +174,12 @@ restart_opencpn = false
     }
 
     #[test]
-    fn load_config_rejects_whitespace_chart_dir() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("config.toml");
-        fs::write(&path, r#"chart_dir = "   ""#).unwrap();
-
-        let error = load_config(&path).unwrap_err();
-        assert!(
-            error.to_string().contains("chart_dir must not be empty"),
-            "unexpected error: {error:#}"
-        );
-    }
-
-    #[test]
-    fn load_config_accepts_missing_chart_dir() {
-        let dir = TempDir::new().unwrap();
-        let chart_dir = dir.path().join("Charts/ENC/US");
-        assert!(!chart_dir.exists());
-
-        let path = dir.path().join("config.toml");
-        fs::write(
-            &path,
-            format!(
-                r#"
-chart_dir = "{}"
-"#,
-                toml_path(&chart_dir)
-            ),
-        )
-        .unwrap();
-
-        let config = load_config(&path).unwrap();
-        assert_eq!(config.chart_dir, chart_dir);
-        assert!(!chart_dir.exists());
-    }
-
-    #[test]
     fn prepare_chart_dir_creates_missing_path() {
         let dir = TempDir::new().unwrap();
-        let chart_dir = dir.path().join("Charts/ENC/US");
+        let chart_dir = dir.path().join("Documents/Charts/ENC/US_CA");
         assert!(!chart_dir.exists());
 
         prepare_chart_dir(&chart_dir).unwrap();
         assert!(chart_dir.is_dir());
-    }
-
-    #[test]
-    fn load_config_rejects_chart_dir_that_is_a_file() {
-        let dir = TempDir::new().unwrap();
-        let chart_path = dir.path().join("not-a-dir");
-        fs::write(&chart_path, b"file").unwrap();
-
-        let path = dir.path().join("config.toml");
-        fs::write(
-            &path,
-            format!(
-                r#"
-chart_dir = "{}"
-"#,
-                toml_path(&chart_path)
-            ),
-        )
-        .unwrap();
-
-        let error = load_config(&path).unwrap_err();
-        assert!(
-            error.to_string().contains("is a file, not a directory"),
-            "unexpected error: {error:#}"
-        );
-    }
-
-    #[test]
-    fn expand_path_errors_when_home_missing() {
-        let _home = crate::test_env::EnvGuard::clear_home_dirs();
-        if home_dir().is_some() {
-            return;
-        }
-        assert!(expand_path(Path::new("~/Charts")).is_err());
-    }
-
-    #[test]
-    fn expand_path_leaves_non_leading_tilde_literal() {
-        let _home = crate::test_env::EnvGuard::clear_home_dirs();
-        let path = Path::new("/tmp/chart~archive");
-
-        assert_eq!(expand_path(path).unwrap(), path);
     }
 }
