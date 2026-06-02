@@ -1,4 +1,4 @@
-//! Numeric code normalization shared by runtime selection and build-time codegen.
+//! Numeric code normalization for region and Coast Guard district matching in source selection.
 
 pub fn normalize_numeric_code(raw: &str) -> String {
     let trimmed = raw.trim().to_ascii_uppercase();

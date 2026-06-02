@@ -1,4 +1,9 @@
 //! OpenCPN ENC folder taxonomy shared by runtime selection and build-time validation.
+//!
+//! XML parsing helpers are also compiled into `build.rs` via `#[path]`; they appear unused
+//! in non-test library builds.
+
+#![cfg_attr(not(test), allow(dead_code))]
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -57,7 +62,6 @@ pub fn recognized_enc_folder(folder: &str) -> bool {
 }
 
 /// Parse recognized chart sources from OpenCPN's embedded `chart_sources.xml` format.
-#[allow(dead_code)] // used by build.rs via `#[path]` include; tests call through the library
 pub fn parse_opencpn_chart_sources(xml: &str) -> Result<Vec<OpenCPNChartSourceRecord>, String> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);

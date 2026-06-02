@@ -2,7 +2,7 @@
 name = "enc-sync"
 version = "1.0.0-rc1"
 edition = "2021"
-description = "Sync NOAA ENC charts for OpenCPN with optional area filters"
+description = "Sync NOAA ENC charts for OpenCPN using multi-folder Chart Downloader layout"
 license = "Apache-2.0"
 repository = "https://github.com/hoffmang9/enc-sync"
 

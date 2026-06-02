@@ -96,24 +96,26 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
             let handles: Vec<_> = chunk
                 .iter()
                 .map(|source| {
-                    scope.spawn(|| {
-                        let folder = source.folder;
+                    let folder = source.folder;
+                    let enc_root = enc_root.clone();
+                    let handle = scope.spawn(move || {
                         let result = catch_unwind(AssertUnwindSafe(|| {
-                            routine(log, &format!("Source {} → {}", source.name, source.folder));
-                            sync_source(config, &enc_root, source, options)
+                            routine(log, &format!("Source {} → {}", source.name, folder));
+                            sync_source(config, &enc_root, source, options, log)
                         }))
                         .unwrap_or_else(|_| Err(anyhow!("sync worker panicked for {folder}")));
                         (folder, result)
-                    })
+                    });
+                    (folder, handle)
                 })
                 .collect();
 
-            for handle in handles {
-                let (folder, result) = match handle.join() {
+            for (folder, handle) in handles {
+                let (_, result) = match handle.join() {
                     Ok(pair) => pair,
                     Err(_) => {
-                        log::error!("Sync worker thread panicked");
-                        failed.push("<panicked>".to_string());
+                        log::error!("Sync worker thread panicked for {folder}");
+                        failed.push(folder.to_string());
                         continue;
                     }
                 };
@@ -147,8 +149,8 @@ fn sync_source(
     enc_root: &std::path::Path,
     source: &ChartSource,
     options: RunOptions,
+    log: LogOptions,
 ) -> Result<usize> {
-    let log = LogOptions::from(options);
     let chart_dir = source.chart_dir(enc_root);
     prepare_chart_dir(&chart_dir)?;
 
@@ -193,6 +195,7 @@ fn sync_source(
         source.folder
     );
     let mut updated = 0usize;
+    let mut cell_failed = Vec::new();
     for (index, cell) in pending.into_iter().enumerate() {
         log::info!(
             "[{}] Downloading {} ({} of {total})",
@@ -200,12 +203,41 @@ fn sync_source(
             cell.name,
             index + 1
         );
-        download_cell(&chart_dir, &cell)?;
-        update_data.insert(cell_key(&cell.name), cell.timestamp);
-        updated += 1;
+        let download_result = download_cell(&chart_dir, &cell);
+        match download_result {
+            Ok(()) => {
+                update_data.insert(cell_key(&cell.name), cell.timestamp);
+                updated += 1;
+            }
+            Err(error) => {
+                log::error!(
+                    "[{}] Failed to update {} ({} of {total}): {error:#}",
+                    source.folder,
+                    cell.name,
+                    index + 1
+                );
+                cell_failed.push(cell.name);
+            }
+        }
     }
-    save_update_data(&chart_dir, &update_data)?;
-    Ok(updated)
+    if updated > 0 {
+        save_update_data(&chart_dir, &update_data)?;
+    }
+    if cell_failed.is_empty() {
+        return Ok(updated);
+    }
+
+    let preview: Vec<_> = cell_failed.iter().take(10).cloned().collect();
+    let mut message = format!(
+        "{} cell(s) failed in {}: {}",
+        cell_failed.len(),
+        source.folder,
+        preview.join(", ")
+    );
+    if cell_failed.len() > 10 {
+        message.push_str(&format!(" ... and {} more", cell_failed.len() - 10));
+    }
+    Err(anyhow!(message))
 }
 
 fn finalize(failed: Vec<String>) -> Result<()> {
