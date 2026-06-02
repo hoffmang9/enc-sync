@@ -1,13 +1,11 @@
 //! Cron-aware logging: routine progress can drop to debug with `--cron`.
 
-pub fn routine(cron: bool, message: &str) {
-    if cron {
+use crate::RunOptions;
+
+pub fn routine(options: RunOptions, message: &str) {
+    if options.cron {
         log::debug!("{message}");
     } else {
         log::info!("{message}");
     }
-}
-
-pub fn important(message: &str) {
-    log::info!("{message}");
 }

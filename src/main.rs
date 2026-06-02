@@ -28,10 +28,7 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let (config_path, options) = parse_args()?;
-    logging::routine(
-        options.cron,
-        &format!("Using config {}", config_path.display()),
-    );
+    logging::routine(options, &format!("Using config {}", config_path.display()));
     let config = load_config(&config_path)?;
     run_with_options(&config, options)
 }

@@ -8,6 +8,7 @@ use zip::read::ZipArchive;
 
 use crate::catalog::Cell;
 use crate::logging::routine;
+use crate::RunOptions;
 
 pub(crate) const UPDATE_DATA_FILENAME: &str = "chartdldr_pi.dat";
 const USER_AGENT: &str = "enc-sync/0.1";
@@ -139,18 +140,18 @@ pub(crate) fn download_catalog(
     catalog_url: &str,
     chart_dir: &Path,
     catalog_filename: &str,
-    cron: bool,
+    options: RunOptions,
 ) -> Result<PathBuf> {
     let catalog_path = chart_dir.join(catalog_filename);
 
-    routine(cron, &format!("Downloading catalog {catalog_url}"));
+    routine(options, &format!("Downloading catalog {catalog_url}"));
     let catalog_url = catalog_url.to_string();
     write_atomically(&catalog_path, |file| {
         file.write_all(&fetch_url(&catalog_url)?)?;
         Ok(())
     })?;
     routine(
-        cron,
+        options,
         &format!("Catalog saved to {}", catalog_path.display()),
     );
     Ok(catalog_path)

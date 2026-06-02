@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::config::Config;
 use crate::source_norm::normalize_numeric_code;
-use crate::source_taxonomy::{source_kind_from_folder, SourceKind};
+use crate::source_taxonomy::{folder_matches_selection, SelectionCriteria};
 
 include!(concat!(env!("OUT_DIR"), "/sources_generated.rs"));
 
@@ -39,7 +39,7 @@ impl ChartSource {
 
 #[derive(Debug, Clone)]
 pub struct SelectedSources {
-    pub sources: Vec<ChartSource>,
+    pub sources: Vec<&'static ChartSource>,
     pub minimum_summary: Option<String>,
 }
 
@@ -73,19 +73,18 @@ impl SourceSelection {
         }
     }
 
-    fn configured(&self, folder: &str) -> bool {
-        let Some(kind) = source_kind_from_folder(folder) else {
-            return false;
-        };
-        match kind {
-            SourceKind::All => self.all_enc,
-            SourceKind::State(code) => self.states.contains(&code),
-            SourceKind::Region(code) => self.regions.contains(&code),
-            SourceKind::CoastGuardDistrict(code) => self.coast_guard_districts.contains(&code),
-            SourceKind::InlandMain | SourceKind::InlandBuoys | SourceKind::InlandOverlays => {
-                self.inland
-            }
+    fn criteria(&self) -> SelectionCriteria<'_> {
+        SelectionCriteria {
+            states: &self.states,
+            regions: &self.regions,
+            coast_guard_districts: &self.coast_guard_districts,
+            all_enc: self.all_enc,
+            inland: self.inland,
         }
+    }
+
+    fn configured(&self, folder: &str) -> bool {
+        folder_matches_selection(folder, &self.criteria())
     }
 
     fn summary(&self) -> Option<String> {
@@ -171,11 +170,11 @@ pub fn select_sources(config: &Config) -> Result<SelectedSources> {
         );
     }
 
-    let mut sources: Vec<ChartSource> = folders
+    let mut sources: Vec<&'static ChartSource> = folders
         .into_iter()
-        .map(|folder| (*known_by_folder[folder]).clone())
+        .map(|folder| known_by_folder[folder])
         .collect();
-    sources.sort_by(|a, b| a.folder.cmp(b.folder));
+    sources.sort_by_key(|source| source.folder);
     Ok(SelectedSources {
         sources,
         minimum_summary,

@@ -1,82 +1,119 @@
 //! OpenCPN ENC folder taxonomy shared by runtime selection and build-time validation.
+//!
+//! This file is compiled into both the library and `build.rs`; each consumer uses a
+//! different subset of helpers, so dead-code warnings are suppressed here.
+#![allow(dead_code)]
+
+use std::collections::HashSet;
 
 use super::source_norm::normalize_numeric_code;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SourceKind {
-    All,
-    State(String),
-    Region(String),
-    CoastGuardDistrict(String),
-    InlandMain,
-    InlandBuoys,
-    InlandOverlays,
+/// Config minimums used when deciding whether a folder is selected.
+pub struct SelectionCriteria<'a> {
+    pub states: &'a HashSet<String>,
+    pub regions: &'a HashSet<String>,
+    pub coast_guard_districts: &'a HashSet<String>,
+    pub all_enc: bool,
+    pub inland: bool,
 }
 
-pub fn source_kind_from_folder(folder: &str) -> Option<SourceKind> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EncFolderClass {
+    All,
+    Inland,
+    State,
+    Region,
+    CoastGuardDistrict,
+}
+
+fn classify_enc_folder(folder: &str) -> Option<(EncFolderClass, &str)> {
     if folder == "US" {
-        return Some(SourceKind::All);
+        return Some((EncFolderClass::All, ""));
     }
-    if folder == "US_INLAND" {
-        return Some(SourceKind::InlandMain);
-    }
-    if folder == "US_INLAND_BUOYS" {
-        return Some(SourceKind::InlandBuoys);
-    }
-    if folder == "US_INLAND_OVERLAYS" {
-        return Some(SourceKind::InlandOverlays);
+    if matches!(
+        folder,
+        "US_INLAND" | "US_INLAND_BUOYS" | "US_INLAND_OVERLAYS"
+    ) {
+        return Some((EncFolderClass::Inland, ""));
     }
     if let Some(code) = folder.strip_prefix("US_CGD") {
-        let code = normalize_numeric_code(code);
-        return Some(SourceKind::CoastGuardDistrict(code));
+        return Some((EncFolderClass::CoastGuardDistrict, code));
     }
     if let Some(code) = folder.strip_prefix("US_REGION") {
-        let code = normalize_numeric_code(code);
-        return Some(SourceKind::Region(code));
+        return Some((EncFolderClass::Region, code));
     }
     if let Some(code) = folder.strip_prefix("US_") {
-        let code = code.to_ascii_uppercase();
-        return Some(SourceKind::State(code));
+        return Some((EncFolderClass::State, code));
     }
     None
 }
 
-/// Used by `build.rs` when parsing embedded OpenCPN source XML.
-#[allow(dead_code)]
 pub fn recognized_enc_folder(folder: &str) -> bool {
-    source_kind_from_folder(folder).is_some()
+    classify_enc_folder(folder).is_some()
+}
+
+pub fn folder_matches_selection(folder: &str, criteria: &SelectionCriteria<'_>) -> bool {
+    let Some((class, code)) = classify_enc_folder(folder) else {
+        return false;
+    };
+    match class {
+        EncFolderClass::All => criteria.all_enc,
+        EncFolderClass::Inland => criteria.inland,
+        EncFolderClass::State => {
+            let code = code.trim().to_ascii_uppercase();
+            criteria.states.contains(&code)
+        }
+        EncFolderClass::Region => criteria.regions.contains(&normalize_numeric_code(code)),
+        EncFolderClass::CoastGuardDistrict => criteria
+            .coast_guard_districts
+            .contains(&normalize_numeric_code(code)),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{source_kind_from_folder, SourceKind};
+    use std::collections::HashSet;
 
-    #[test]
-    fn source_kind_from_folder_recognizes_opencpn_layout() {
-        assert_eq!(source_kind_from_folder("US"), Some(SourceKind::All));
-        assert_eq!(
-            source_kind_from_folder("US_CGD13"),
-            Some(SourceKind::CoastGuardDistrict("13".into()))
-        );
-        assert_eq!(
-            source_kind_from_folder("US_REGION14"),
-            Some(SourceKind::Region("14".into()))
-        );
-        assert_eq!(
-            source_kind_from_folder("US_CA"),
-            Some(SourceKind::State("CA".into()))
-        );
-        assert_eq!(
-            source_kind_from_folder("US_INLAND_BUOYS"),
-            Some(SourceKind::InlandBuoys)
-        );
+    use super::{folder_matches_selection, recognized_enc_folder, SelectionCriteria};
+
+    fn criteria<'a>(
+        states: &'a HashSet<String>,
+        regions: &'a HashSet<String>,
+        coast_guard_districts: &'a HashSet<String>,
+        all_enc: bool,
+        inland: bool,
+    ) -> SelectionCriteria<'a> {
+        SelectionCriteria {
+            states,
+            regions,
+            coast_guard_districts,
+            all_enc,
+            inland,
+        }
     }
 
     #[test]
-    fn source_kind_from_folder_normalizes_numeric_codes() {
-        assert_eq!(
-            source_kind_from_folder("US_CGD01"),
-            Some(SourceKind::CoastGuardDistrict("1".into()))
-        );
+    fn recognized_enc_folder_recognizes_opencpn_layout() {
+        assert!(recognized_enc_folder("US"));
+        assert!(recognized_enc_folder("US_CGD13"));
+        assert!(recognized_enc_folder("US_REGION14"));
+        assert!(recognized_enc_folder("US_CA"));
+        assert!(recognized_enc_folder("US_INLAND_BUOYS"));
+        assert!(!recognized_enc_folder("ignored"));
+    }
+
+    #[test]
+    fn folder_matches_selection_respects_config_minimums() {
+        let states = HashSet::from(["CA".to_string()]);
+        let regions = HashSet::from(["14".to_string()]);
+        let districts = HashSet::from(["1".to_string()]);
+        let selection = criteria(&states, &regions, &districts, false, false);
+
+        assert!(folder_matches_selection("US_CA", &selection));
+        assert!(!folder_matches_selection("US_OR", &selection));
+        assert!(folder_matches_selection("US_REGION14", &selection));
+        assert!(folder_matches_selection("US_CGD01", &selection));
+        assert!(!folder_matches_selection("US", &selection));
+        assert!(!folder_matches_selection("US_INLAND", &selection));
     }
 }

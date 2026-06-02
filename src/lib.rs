@@ -40,14 +40,13 @@ use anyhow::{bail, Result};
 
 pub use catalog::{parse_catalog, Cell};
 pub use config::{home_dir, load_config, Config};
-pub use source_taxonomy::SourceKind;
 pub use sources::ChartSource;
 
 use charts::{
     cell_key, download_catalog, download_cell, load_update_data, needs_update, save_update_data,
 };
 use config::prepare_chart_dir;
-use logging::{important, routine};
+use logging::routine;
 use opencpn::restart_opencpn;
 use sources::{enc_root, select_sources};
 
@@ -74,9 +73,9 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     let selected = select_sources(config)?;
 
     if let Some(summary) = selected.minimum_summary {
-        important(&format!("Config minimum: {summary}"));
+        log::info!("Config minimum: {summary}");
     }
-    important(&format!(
+    log::info!(
         "Syncing {} chart source(s): {}",
         selected.sources.len(),
         selected
@@ -85,7 +84,7 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
             .map(|source| source.folder)
             .collect::<Vec<_>>()
             .join(", ")
-    ));
+    );
 
     let mut failed = Vec::new();
     let mut updated = 0usize;
@@ -97,7 +96,7 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
                 .map(|source| {
                     scope.spawn(|| {
                         routine(
-                            options.cron,
+                            options,
                             &format!("Source {} → {}", source.name, source.folder),
                         );
                         let result = sync_source(config, &enc_root, source, options);
@@ -120,14 +119,14 @@ pub fn run_with_options(config: &Config, options: RunOptions) -> Result<()> {
     }
 
     if options.catalog_only {
-        routine(options.cron, "Catalog-only mode; skipping OpenCPN restart");
+        routine(options, "Catalog-only mode; skipping OpenCPN restart");
         return finalize(failed);
     }
 
     if updated > 0 && config.restart_opencpn {
         restart_opencpn(config.rebuild_chart_db)?;
     } else if updated == 0 {
-        important("No chart files changed; leaving OpenCPN running");
+        log::info!("No chart files changed; leaving OpenCPN running");
     }
 
     finalize(failed)
@@ -146,7 +145,7 @@ fn sync_source(
         &source.resolve_catalog_url(config),
         &chart_dir,
         source.catalog_filename,
-        options.cron,
+        options,
     )?;
 
     if options.catalog_only {
@@ -155,7 +154,7 @@ fn sync_source(
 
     let cells = parse_catalog(&catalog_path)?;
     routine(
-        options.cron,
+        options,
         &format!(
             "{} lists {} chart cells",
             source.catalog_filename,
@@ -171,25 +170,25 @@ fn sync_source(
 
     if pending.is_empty() {
         routine(
-            options.cron,
+            options,
             &format!("All cells up to date in {}", chart_dir.display()),
         );
         return Ok(0);
     }
 
     let total = pending.len();
-    important(&format!(
+    log::info!(
         "Downloading {total} updated or new cells into {}",
         source.folder
-    ));
+    );
     let mut updated = 0usize;
     for (index, cell) in pending.into_iter().enumerate() {
-        important(&format!(
+        log::info!(
             "[{}] Downloading {} ({} of {total})",
             source.folder,
             cell.name,
             index + 1
-        ));
+        );
         download_cell(&chart_dir, &cell)?;
         update_data.insert(cell_key(&cell.name), cell.timestamp);
         updated += 1;
